@@ -43,6 +43,10 @@ type AllocationRow = {
   whySignal: string;
   bullCaseTriggers: string[];
   exitSignals: string[];
+  targetPrice: number;
+  upsidePercent: number;
+  potentialProfit: number;
+  formattedPotentialProfit: string;
   confidenceScore: number;
   confidenceReason: string;
   confidenceUpside: string;
@@ -115,9 +119,9 @@ function signalCount(rows: AllocationRow[], tone: BuySignal["tone"]) {
 function portfolioVerdict(rows: AllocationRow[]) {
   const buy = signalCount(rows, "green");
   const accumulate = signalCount(rows, "yellow");
-  if (buy > 0) return `${buy} of your ${rows.length} stocks are near 52 week lows. Historically a strong time to accumulate slowly.`;
-  if (accumulate > 0) return `${accumulate} of your ${rows.length} stocks have cooled from highs. Staggered buying is better than rushing in.`;
-  return `Most selected stocks are still close to highs. Keep watchlisted capital ready and wait for better entries.`;
+  if (buy > 0) return `${buy} of your ${rows.length} stocks are in a cheaper zone right now. This is where disciplined investors usually start building slowly.`;
+  if (accumulate > 0) return `${accumulate} of your ${rows.length} stocks have already cooled from recent highs. Staggered buying is better than rushing in.`;
+  return `Most selected stocks still look expensive. Keep cash ready and wait for better entries.`;
 }
 
 export default function Home() {
@@ -357,6 +361,28 @@ export default function Home() {
                 </div>
               </section>
 
+              <section className="scenario-section top-scenarios">
+                <p className="eyebrow">What You Could Make</p>
+                <h2>If This Goes Right</h2>
+                <div className="scenario-grid">
+                  <div className="scenario-card">
+                    <span>Conservative: if safer Core stocks return 15%</span>
+                    <strong>{currency.format(coreScenario)}</strong>
+                    <small>Possible portfolio value in 12 months</small>
+                  </div>
+                  <div className="scenario-card">
+                    <span>Realistic: if Growth stocks return 35%</span>
+                    <strong>{currency.format(realisticScenario)}</strong>
+                    <small>Possible portfolio value in 12 months</small>
+                  </div>
+                  <div className="scenario-card best">
+                    <span>Best Case: if Core and Growth both work</span>
+                    <strong>{currency.format(bestCaseScenario)}</strong>
+                    <small>This is the upside case, not a guarantee</small>
+                  </div>
+                </div>
+              </section>
+
               <section className="report-card">
                 <div className="report-head">
                   <div>
@@ -404,6 +430,24 @@ export default function Home() {
                         <strong>{row.formattedAmount}</strong>
                       </div>
 
+                      <div className="upside-grid">
+                        <div>
+                          <span>Possible upside</span>
+                          <strong>{row.upsidePercent > 0 ? `+${row.upsidePercent.toFixed(1)}%` : "Wait"}</strong>
+                          <small>From current price to profit target</small>
+                        </div>
+                        <div>
+                          <span>Possible profit</span>
+                          <strong>{row.formattedPotentialProfit}</strong>
+                          <small>Based on estimated shares</small>
+                        </div>
+                        <div>
+                          <span>Profit target</span>
+                          <strong>{priceFormat.format(row.targetPrice)}</strong>
+                          <small>Price where taking profits starts</small>
+                        </div>
+                      </div>
+
                       {!row.canBuy ? (
                         <div className="watch-card">
                           <strong>Watch only</strong>
@@ -416,7 +460,7 @@ export default function Home() {
                             <strong>{row.estimatedShares}</strong>
                           </div>
                           <div>
-                            <span>Buy below price</span>
+                            <span>Better entry price</span>
                             <strong>{priceFormat.format(row.buyBelowPrice)}</strong>
                           </div>
                         </div>
@@ -434,7 +478,7 @@ export default function Home() {
                       <div className="reason-grid">
                         <section><h3>Why this bucket</h3><p>{row.whyBucket}</p></section>
                         <section><h3>Why this allocation percentage</h3><p>{row.whyAllocation}</p></section>
-                        <section><h3>Why this buy below price</h3><p>{row.whyBuyBelowPrice}</p></section>
+                        <section><h3>Why this better entry price</h3><p>{row.whyBuyBelowPrice}</p></section>
                         <section><h3>Why this signal</h3><p>{row.whySignal}</p></section>
                       </div>
 
@@ -471,25 +515,6 @@ export default function Home() {
                       </div>
                     </article>
                   ))}
-                </div>
-              </section>
-
-              <section className="scenario-section">
-                <p className="eyebrow">If This Goes Right</p>
-                <h2>If This Goes Right</h2>
-                <div className="scenario-grid">
-                  <div className="scenario-card">
-                    <span>Conservative: if all Core stocks return 15% in 12 months</span>
-                    <strong>{currency.format(coreScenario)}</strong>
-                  </div>
-                  <div className="scenario-card">
-                    <span>Realistic: if all Growth stocks return 35% in 12 months</span>
-                    <strong>{currency.format(realisticScenario)}</strong>
-                  </div>
-                  <div className="scenario-card">
-                    <span>Best Case: if Core and Growth hit together</span>
-                    <strong>{currency.format(bestCaseScenario)}</strong>
-                  </div>
                 </div>
               </section>
 
@@ -994,10 +1019,77 @@ h2 { margin: 0; color: #fff; font-size: 28px; line-height: 1.1; }
   font-size: 11px;
   line-height: 1.45;
 }
+.upside-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.upside-grid div {
+  border: 1px solid #B7E5DC;
+  border-radius: 8px;
+  background: #E9F7F4;
+  padding: 16px;
+}
+.upside-grid span, .upside-grid small, .scenario-card small {
+  display: block;
+  color: #425466;
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+.upside-grid strong {
+  display: block;
+  margin-top: 7px;
+  color: #007C68;
+  font-size: clamp(28px, 4vw, 48px);
+  line-height: 1;
+}
+.upside-grid small, .scenario-card small { margin-top: 7px; text-transform: none; }
+.scenario-card.best {
+  border-color: #00A88C;
+  background: #E9F7F4;
+}
+
+/* Clarity pass: black text on light cards, with teal reserved for upside and actions. */
+body, .war-room { background: #F4F7F5; color: #050505; }
+h1, h2, .hero-card strong, .metric-card strong, .summary-row strong, .stock-name strong,
+.price-line strong, .reason-grid h3, .confidence-box h3, .risk-box h3 {
+  color: #050505;
+}
+.hero-card, .empty-panel, .loading-panel, .report-card, .metric-card,
+.scenario-section, .stock-card, .portfolio-summary, .form-card {
+  border-color: #D7E1DD;
+  background: #FFFFFF;
+  box-shadow: 0 18px 50px rgba(15, 23, 42, 0.1);
+}
+.subhead, .hero-card small, .metric-card small, .stock-name span, .signal-reason,
+.reason-grid p, .confidence-box p, .confidence-box small, .summary-row span,
+.summary-row small, .hero-card span, .metric-card span, .scenario-card span,
+.big-money span, .price-line span {
+  color: #334155;
+}
+.eyebrow, .card-title { color: #007C68; }
+.field > span, .risk-field > span, .risk-options button, .ticker-grid input,
+.input-shell input, .risk-box ul, .legal-disclaimer { color: #050505; }
+.input-shell, .risk-options button, .ticker-grid input, .price-line div,
+.reason-grid section, .confidence-box, .risk-box, .scenario-card,
+.summary-row div, .report-summary span {
+  border-color: #D7E1DD;
+  background: #F8FAFC;
+}
+.portfolio-summary {
+  background: linear-gradient(135deg, rgba(0, 201, 167, 0.22), #FFFFFF 58%);
+}
+.stock-card { border-left: 5px solid #00A88C; }
+.stock-card + .stock-card { border-top-color: #D7E1DD; }
+.summary-row strong, .scenario-card strong, .big-money strong { color: #007C68; }
+.signal-banner.green, .signal-banner.yellow, .signal-banner.red { color: #FFFFFF; }
+.confidence-bar span { background: #D7E1DD; }
+.confidence-bar span.filled { background: #00A88C; }
 .spin { animation: spin 900ms linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (max-width: 1120px) {
-  .hero, .layout, .summary-grid, .scenario-grid, .summary-row, .reason-grid { grid-template-columns: 1fr; }
+  .hero, .layout, .summary-grid, .scenario-grid, .summary-row, .reason-grid, .upside-grid { grid-template-columns: 1fr; }
   .form-card { position: static; }
 }
 @media (max-width: 680px) {

@@ -462,8 +462,7 @@ function whyAllocation(profile: StockProfile, riskLevel: RiskLevel, allocationPe
 }
 
 function whyBuyBelow(profile: StockProfile, buyBelowPrice: number) {
-  const low = profile.fiftyTwoWeekLow ? INR_FORMATTER.format(profile.fiftyTwoWeekLow) : "the estimated yearly low";
-  return `${INR_FORMATTER.format(buyBelowPrice)} uses the midpoint between current price and ${low}, minus 5%, while staying above the 52 week low.`;
+  return `${INR_FORMATTER.format(buyBelowPrice)} is the better entry zone: below today's price, but not so low that the order is unrealistic.`;
 }
 
 function confidenceScore(profile: StockProfile, signalTone: "green" | "yellow" | "red") {
@@ -707,6 +706,18 @@ function exitSignalsFor(profile: StockProfile, buyBelowPrice: number) {
   ];
 }
 
+function upsideStats(profile: StockProfile, allocationAmount: number, buyBelowPrice: number) {
+  const targetPrice = buyBelowPrice * 1.25;
+  const shares = profile.price > 0 ? Math.floor(allocationAmount / profile.price) : 0;
+  const upsidePercent = profile.price > 0 ? ((targetPrice - profile.price) / profile.price) * 100 : 0;
+  const potentialProfit = Math.max(0, shares * Math.max(0, targetPrice - profile.price));
+  return {
+    targetPrice: Number(targetPrice.toFixed(2)),
+    upsidePercent: Number(upsidePercent.toFixed(1)),
+    potentialProfit: Math.round(potentialProfit)
+  };
+}
+
 function applyPositionCap(weights: number[], maxWeight: number) {
   const capped = [...weights];
 
@@ -888,11 +899,16 @@ function allocate({
   }).map((row) => {
     const profile = profiles.find((item) => item.symbol === row.resolvedSymbol) as StockProfile;
     const score = confidenceScore(profile, row.buySignal.tone);
+    const upside = upsideStats(profile, row.allocationAmount, row.buyBelowPrice);
     return {
       ...row,
       whyBuyBelowPrice: whyBuyBelow(profile, row.buyBelowPrice),
       whySignal: row.buySignal.reason,
       exitSignals: exitSignalsFor(profile, row.buyBelowPrice),
+      targetPrice: upside.targetPrice,
+      upsidePercent: upside.upsidePercent,
+      potentialProfit: upside.potentialProfit,
+      formattedPotentialProfit: INR_FORMATTER.format(upside.potentialProfit),
       confidenceScore: score,
       confidenceReason: confidenceExplanation(profile, score),
       confidenceUpside: confidenceUpside(profile)
