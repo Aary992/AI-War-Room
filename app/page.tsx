@@ -125,9 +125,12 @@ function signalCount(rows: AllocationRow[], tone: BuySignal["tone"]) {
 function portfolioVerdict(rows: AllocationRow[]) {
   const buy = signalCount(rows, "green");
   const accumulate = signalCount(rows, "yellow");
-  if (buy > 0) return `${buy} of your ${rows.length} stocks are in a cheaper zone right now. This is where disciplined investors usually start building slowly.`;
-  if (accumulate > 0) return `${accumulate} of your ${rows.length} stocks have already cooled from recent highs. Staggered buying is better than rushing in.`;
-  return `Most selected stocks still look expensive. Keep cash ready and wait for better entries.`;
+  const wait = signalCount(rows, "red");
+  return `${buy} buy, ${accumulate} accumulate, ${wait} wait. The plan below shows what to buy, what to watch, and where the possible upside comes from.`;
+}
+
+function scenarioGain(rows: AllocationRow[], bucket: Bucket, returnPercent: number) {
+  return bucketAmount(rows, bucket) * returnPercent;
 }
 
 export default function Home() {
@@ -171,6 +174,9 @@ export default function Home() {
   const bestCaseScenario = result
     ? result.capital + bucketAmount(result.rows, "Core") * 0.15 + bucketAmount(result.rows, "Growth") * 0.35
     : 0;
+  const coreGain = result ? scenarioGain(result.rows, "Core", 0.15) : 0;
+  const growthGain = result ? scenarioGain(result.rows, "Growth", 0.35) : 0;
+  const bestCaseGain = coreGain + growthGain;
 
   async function generateAllocation(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -375,6 +381,15 @@ export default function Home() {
                 <div>
                   <p className="eyebrow">Portfolio Level Summary</p>
                   <h2>{portfolioVerdict(result.rows)}</h2>
+                  <p className="summary-explainer">
+                    Core means safer base stocks. Growth means higher upside stocks. Speculative means higher-risk bets.
+                    Buy zone means the stock looks interesting now. Accumulate means buy slowly. Wait means do not rush.
+                  </p>
+                </div>
+                <div className="mobile-jumps" aria-label="Report shortcuts">
+                  <a href="#upside">Upside</a>
+                  <a href="#stocks">Stocks</a>
+                  <a href="#disclaimer">Disclaimer</a>
                 </div>
                 <div className="summary-row">
                   <div><span>Total capital</span><strong>{currency.format(result.capital)}</strong></div>
@@ -402,24 +417,28 @@ export default function Home() {
                 ) : null}
               </section>
 
-              <section className="scenario-section top-scenarios">
+              <section className="scenario-section top-scenarios" id="upside">
                 <p className="eyebrow">What You Could Make</p>
                 <h2>If This Goes Right</h2>
+                <p className="scenario-note">
+                  These numbers only apply to the money allocated to each category. Example: if ₹20,000 is in Core,
+                  a 15% Core return adds ₹3,000, not 15% on the full portfolio.
+                </p>
                 <div className="scenario-grid">
                   <div className="scenario-card">
                     <span>Conservative: if safer Core stocks return 15%</span>
                     <strong>{currency.format(coreScenario)}</strong>
-                    <small>Possible portfolio value in 12 months</small>
+                    <small>{currency.format(bucketAmount(result.rows, "Core"))} in Core + {currency.format(coreGain)} possible gain</small>
                   </div>
                   <div className="scenario-card">
                     <span>Realistic: if Growth stocks return 35%</span>
                     <strong>{currency.format(realisticScenario)}</strong>
-                    <small>Possible portfolio value in 12 months</small>
+                    <small>{currency.format(bucketAmount(result.rows, "Growth"))} in Growth + {currency.format(growthGain)} possible gain</small>
                   </div>
                   <div className="scenario-card best">
                     <span>Best Case: if Core and Growth both work</span>
                     <strong>{currency.format(bestCaseScenario)}</strong>
-                    <small>This is the upside case, not a guarantee</small>
+                    <small>Core + Growth possible gain: {currency.format(bestCaseGain)}</small>
                   </div>
                 </div>
               </section>
@@ -451,7 +470,7 @@ export default function Home() {
                   ))}
                 </div>
 
-                <div className="stock-grid">
+                <div className="stock-grid" id="stocks">
                   {result.rows.map((row) => (
                     <article className="stock-card" key={row.resolvedSymbol}>
                       <div className="stock-head">
@@ -572,7 +591,7 @@ export default function Home() {
                 Share My Allocation
               </button>
 
-              <p className="legal-disclaimer">
+              <p className="legal-disclaimer" id="disclaimer">
                 This tool is for educational purposes only and is not financial advice, research advice, or a recommendation to buy or sell any security under SEBI guidelines. Outputs are AI-generated and may be inaccurate. Past performance does not guarantee future results. Consult a SEBI registered investment advisor before investing. The creator holds no liability for any financial decisions made using this tool.
               </p>
             </>
@@ -848,6 +867,39 @@ h2 { margin: 0; color: #fff; font-size: 28px; line-height: 1.1; }
   background: linear-gradient(135deg, rgba(0, 201, 167, 0.28), #141B2D 58%);
 }
 .portfolio-summary h2 { max-width: 920px; font-size: clamp(24px, 3vw, 38px); }
+.summary-explainer, .scenario-note {
+  max-width: 920px;
+  margin: 10px 0 0;
+  color: #334155;
+  font-size: 15px;
+  line-height: 1.5;
+  font-weight: 750;
+}
+.mobile-jumps {
+  position: sticky;
+  top: 8px;
+  z-index: 5;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid #B7E5DC;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(10px);
+}
+.mobile-jumps a {
+  flex: 1 1 110px;
+  display: inline-flex;
+  justify-content: center;
+  border-radius: 8px;
+  background: #E9F7F4;
+  color: #007C68;
+  padding: 9px 10px;
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 950;
+}
 .summary-row {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1138,6 +1190,7 @@ h2 { margin: 0; color: #fff; font-size: 28px; line-height: 1.1; }
   font-size: clamp(30px, 4vw, 48px);
   line-height: 1;
 }
+.scenario-note { margin-bottom: 2px; }
 .whatsapp-button {
   display: inline-flex;
   align-items: center;
@@ -1235,6 +1288,13 @@ h1, h2, .hero-card strong, .metric-card strong, .summary-row strong, .stock-name
 }
 @media (max-width: 680px) {
   .war-room { padding: 16px; }
+  h1 { font-size: 42px; }
+  .portfolio-summary h2 { font-size: 26px; line-height: 1.12; }
+  .summary-explainer, .scenario-note { font-size: 14px; }
+  .report-head, .stock-grid, .bucket-strip, .report-summary { padding-left: 16px; padding-right: 16px; }
+  .stock-card { padding: 16px; }
+  .upside-grid strong, .scenario-card strong { font-size: 34px; }
+  .stock-name strong { font-size: 30px; }
   .ticker-grid, .price-line { grid-template-columns: 1fr; }
   .report-head, .stock-head, .signal-banner { flex-direction: column; }
   .signal-banner { align-items: flex-start; }
