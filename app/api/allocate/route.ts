@@ -490,6 +490,20 @@ function confidenceUpside(profile: StockProfile) {
   return `The score would improve if ${profile.name} moves closer to its 52 week low while earnings and sector data stay stable.`;
 }
 
+function riskMeterFor(profile: StockProfile) {
+  const volatility = profile.annualVolatility ?? 0.6;
+  if (profile.bucket === "Core" && volatility < 0.45) return "Low Risk";
+  if (profile.bucket === "Speculative" || volatility > 0.75) return "High Risk";
+  return "Medium Risk";
+}
+
+function buyPlanFor(profile: StockProfile, canBuy: boolean) {
+  if (!canBuy) return "Watchlist only. Do not force a buy until the allocated capital can buy at least 1 share.";
+  if (profile.bucket === "Core") return "Buy 50% near the better entry price, keep 50% for a second dip.";
+  if (profile.bucket === "Growth") return "Buy 35% near the better entry price, keep 65% for dips or confirmation.";
+  return "Buy only 20% near the better entry price, keep 80% aside because this is higher risk.";
+}
+
 function riskBulletsFor(profile: StockProfile) {
   const ticker = baseTicker(profile.symbol);
   const company = profile.name || profile.requestedTicker;
@@ -718,6 +732,12 @@ function upsideStats(profile: StockProfile, allocationAmount: number, buyBelowPr
   };
 }
 
+function plainBucketLabel(bucket: Bucket) {
+  if (bucket === "Core") return "Safer base stock";
+  if (bucket === "Growth") return "Upside stock";
+  return "High-risk bet";
+}
+
 function applyPositionCap(weights: number[], maxWeight: number) {
   const capped = [...weights];
 
@@ -892,6 +912,9 @@ function allocate({
       riskBullets: riskBulletsFor(profile),
       canBuy: amount >= profile.price,
       watchMessage: amount < profile.price ? "Capital too low to buy even 1 share at current price. Watch this stock and add capital later." : null,
+      riskMeter: riskMeterFor(profile),
+      buyPlan: buyPlanFor(profile, amount >= profile.price),
+      plainBucket: plainBucketLabel(profile.bucket),
       whyBucket: whyBucket(profile),
       whyAllocation: whyAllocation(profile, riskLevel, roundedPercentage),
       bullCaseTriggers: bullCaseTriggersFor(profile)
@@ -916,6 +939,17 @@ function allocate({
   });
 }
 
+function buildSectorWarnings(rows: Array<{ sector: string; allocationPercent: number }>) {
+  const totals = rows.reduce<Record<string, number>>((acc, row) => {
+    acc[row.sector] = (acc[row.sector] ?? 0) + row.allocationPercent;
+    return acc;
+  }, {});
+
+  return Object.entries(totals)
+    .filter(([, percent]) => percent >= 45)
+    .map(([sector, percent]) => `${percent.toFixed(0)}% of this portfolio is in ${sector}. That can work, but one bad sector move could hurt the whole plan.`);
+}
+
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as Partial<AllocationInput>;
@@ -926,7 +960,7 @@ export async function POST(request: Request) {
     const maxPositionPercent = clamp(Number(body.maxPositionPercent ?? 35), 10, 100);
     const trancheCount = Math.round(clamp(Number(body.trancheCount ?? 3), 1, 6));
     const tickers = Array.isArray(body.tickers)
-      ? body.tickers.map(cleanTicker).filter(Boolean).slice(0, 5)
+      ? Array.from(new Set(body.tickers.map(cleanTicker).filter(Boolean))).slice(0, 25)
       : [];
 
     if (!Number.isFinite(capital) || capital <= 0) {
@@ -1023,6 +1057,7 @@ export async function POST(request: Request) {
       formattedCapital: INR_FORMATTER.format(capital),
       riskLevel,
       rows,
+      sectorWarnings: buildSectorWarnings(rows),
       deploymentPlan: {
         deployableCapital,
         formattedDeployableCapital: INR_FORMATTER.format(deployableCapital),

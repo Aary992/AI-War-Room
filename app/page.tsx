@@ -1,9 +1,11 @@
 "use client";
 
 import {
+  Eye,
   CircleDollarSign,
   Download,
   Loader2,
+  Plus,
   MessageCircle,
   Printer,
   Send,
@@ -37,6 +39,9 @@ type AllocationRow = {
   riskBullets: string[];
   canBuy: boolean;
   watchMessage: string | null;
+  riskMeter: "Low Risk" | "Medium Risk" | "High Risk";
+  buyPlan: string;
+  plainBucket: string;
   whyBucket: string;
   whyAllocation: string;
   whyBuyBelowPrice: string;
@@ -58,6 +63,7 @@ type AllocationResponse = {
   formattedCapital: string;
   riskLevel: RiskLevel;
   rows: AllocationRow[];
+  sectorWarnings: string[];
 };
 
 const currency = new Intl.NumberFormat("en-IN", {
@@ -128,6 +134,7 @@ export default function Home() {
   const [capital, setCapital] = useState("500000");
   const [riskLevel, setRiskLevel] = useState<RiskLevel>("balanced");
   const [tickers, setTickers] = useState(["", "", "", "", ""]);
+  const [viewMode, setViewMode] = useState<"simple" | "detailed">("simple");
   const [result, setResult] = useState<AllocationResponse | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -206,6 +213,14 @@ export default function Home() {
     );
   }
 
+  function addTickerInput() {
+    setTickers((current) => [...current, ""]);
+  }
+
+  function removeTickerInput(index: number) {
+    setTickers((current) => current.length <= 1 ? current : current.filter((_, currentIndex) => currentIndex !== index));
+  }
+
   function downloadCsv() {
     if (!result) return;
     const headers = ["Ticker", "Company", "Signal", "Bucket", "Allocation %", "Amount", "Shares", "Buy Below", "Current Price", "Fall From High"];
@@ -247,14 +262,14 @@ export default function Home() {
           <p className="eyebrow">Stock allocation planner</p>
           <h1>War Room Allocator {"\u2014"} by Aarit Shah</h1>
           <p className="subhead">
-            Enter capital, risk level, and up to five tickers. Get an allocation plan
-            with intelligent entry signals, buy-below prices, and stock-specific risks.
+            Add stocks from your current portfolio or stocks you are watching. The tool shows possible upside,
+            better entry zones, risk level, and a simple buy/watch plan.
           </p>
         </div>
         <div className="hero-card">
           <span>Current setup</span>
           <strong>{riskLabels[riskLevel]}</strong>
-          <small>{riskDescriptions[riskLevel]} | {cleanTickers.length}/5 stocks</small>
+          <small>{riskDescriptions[riskLevel]} | {cleanTickers.length} stocks added</small>
         </div>
       </section>
 
@@ -263,6 +278,11 @@ export default function Home() {
           <div className="card-title">
             <Target size={18} aria-hidden />
             Inputs
+          </div>
+
+          <div className="guide-card">
+            <strong>Start here</strong>
+            <span>Enter your total capital, then add every stock you own or are thinking of buying. Use NSE tickers like TCS, INFY, RELIANCE, IDEA, E2E.</span>
           </div>
 
           <label className="field">
@@ -298,19 +318,35 @@ export default function Home() {
           </div>
 
           <div className="field">
-            <span>Stock tickers</span>
+            <span>Stocks you own or are watching</span>
             <div className="ticker-grid">
               {tickers.map((ticker, index) => (
-                <input
-                  key={index}
-                  aria-label={`Ticker ${index + 1}`}
-                  value={ticker}
-                  onChange={(event) => updateTicker(index, event.target.value)}
-                  placeholder="TICKER"
-                  maxLength={18}
-                />
+                <div className="ticker-row" key={index}>
+                  <input
+                    aria-label={`Ticker ${index + 1}`}
+                    value={ticker}
+                    onChange={(event) => updateTicker(index, event.target.value)}
+                    placeholder="TICKER"
+                    maxLength={18}
+                  />
+                  <button type="button" onClick={() => removeTickerInput(index)} aria-label={`Remove ticker ${index + 1}`}>×</button>
+                </div>
               ))}
             </div>
+            <button className="secondary" type="button" onClick={addTickerInput}>
+              <Plus size={16} aria-hidden />
+              Add another stock
+            </button>
+            <small className="field-help">No 5-stock limit. For speed, keep it under 25 stocks per run.</small>
+          </div>
+
+          <div className="view-toggle">
+            <button type="button" className={viewMode === "simple" ? "active" : ""} onClick={() => setViewMode("simple")}>
+              <Eye size={15} aria-hidden /> Simple
+            </button>
+            <button type="button" className={viewMode === "detailed" ? "active" : ""} onClick={() => setViewMode("detailed")}>
+              Detailed
+            </button>
           </div>
 
           <button className="primary" type="submit" disabled={loading || cleanTickers.length === 0}>
@@ -359,6 +395,11 @@ export default function Home() {
                   <div><span>Accumulate</span><strong>{signalCount(result.rows, "yellow")}/{result.rows.length}</strong></div>
                   <div><span>Wait zone</span><strong>{signalCount(result.rows, "red")}/{result.rows.length}</strong></div>
                 </div>
+                {result.sectorWarnings.length ? (
+                  <div className="warning-list">
+                    {result.sectorWarnings.map((warning) => <p key={warning}>{warning}</p>)}
+                  </div>
+                ) : null}
               </section>
 
               <section className="scenario-section top-scenarios">
@@ -424,6 +465,7 @@ export default function Home() {
                       </div>
 
                       <span className={`bucket ${bucketClass(row.bucket)}`}>{row.bucket}</span>
+                      <span className="plain-bucket">{row.plainBucket} · {row.riskMeter}</span>
 
                       <div className="big-money">
                         <span>Allocate</span>
@@ -446,6 +488,11 @@ export default function Home() {
                           <strong>{priceFormat.format(row.targetPrice)}</strong>
                           <small>Price where taking profits starts</small>
                         </div>
+                      </div>
+
+                      <div className="buy-plan">
+                        <strong>{row.buySignal.tone === "red" ? "Watchlist mode" : "Suggested buy plan"}</strong>
+                        <span>{row.buyPlan}</span>
                       </div>
 
                       {!row.canBuy ? (
@@ -475,12 +522,14 @@ export default function Home() {
 
                       <p className="signal-reason">{row.buySignal.reason}</p>
 
-                      <div className="reason-grid">
-                        <section><h3>Why this bucket</h3><p>{row.whyBucket}</p></section>
-                        <section><h3>Why this allocation percentage</h3><p>{row.whyAllocation}</p></section>
-                        <section><h3>Why this better entry price</h3><p>{row.whyBuyBelowPrice}</p></section>
-                        <section><h3>Why this signal</h3><p>{row.whySignal}</p></section>
-                      </div>
+                      {viewMode === "detailed" ? (
+                        <div className="reason-grid">
+                          <section><h3>Why this category</h3><p>{row.whyBucket}</p></section>
+                          <section><h3>Why this amount</h3><p>{row.whyAllocation}</p></section>
+                          <section><h3>Why this entry price</h3><p>{row.whyBuyBelowPrice}</p></section>
+                          <section><h3>Why this signal</h3><p>{row.whySignal}</p></section>
+                        </div>
+                      ) : null}
 
                       <div className="confidence-box">
                         <h3>Conviction: {row.confidenceScore}/10</h3>
@@ -493,12 +542,12 @@ export default function Home() {
                         <small>{row.confidenceUpside}</small>
                       </div>
 
-                      <div className="risk-box">
+                      {viewMode === "detailed" ? <div className="risk-box">
                         <h3>Risk Snapshot</h3>
                         <ul>
                           {row.riskBullets.map((bullet) => <li key={bullet}>{bullet}</li>)}
                         </ul>
-                      </div>
+                      </div> : null}
 
                       <div className="risk-box">
                         <h3>Bull Case Triggers</h3>
@@ -524,7 +573,7 @@ export default function Home() {
               </button>
 
               <p className="legal-disclaimer">
-                This tool is for educational purposes only. Nothing here is financial advice or a recommendation to buy or sell any security. Outputs are AI-generated and may be inaccurate. Past performance does not guarantee future results. Consult a SEBI registered investment advisor before investing. The creator holds no liability for any financial decisions made using this tool.
+                This tool is for educational purposes only and is not financial advice, research advice, or a recommendation to buy or sell any security under SEBI guidelines. Outputs are AI-generated and may be inaccurate. Past performance does not guarantee future results. Consult a SEBI registered investment advisor before investing. The creator holds no liability for any financial decisions made using this tool.
               </p>
             </>
           )}
@@ -631,6 +680,22 @@ h2 { margin: 0; color: #fff; font-size: 28px; line-height: 1.1; }
 }
 .field, .risk-field { display: grid; gap: 8px; margin-bottom: 18px; }
 .field > span, .risk-field > span { color: #E0E0E0; font-size: 13px; font-weight: 900; }
+.guide-card {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 18px;
+  border: 1px solid #B7E5DC;
+  border-radius: 8px;
+  background: #E9F7F4;
+  padding: 13px;
+}
+.guide-card strong { color: #050505; font-size: 15px; }
+.guide-card span, .field-help {
+  color: #334155;
+  font-size: 12px;
+  line-height: 1.45;
+  font-weight: 750;
+}
 .input-shell {
   display: flex;
   align-items: center;
@@ -671,6 +736,7 @@ h2 { margin: 0; color: #fff; font-size: 28px; line-height: 1.1; }
 }
 .risk-options small { color: #AAB4C5; font-weight: 700; }
 .ticker-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.ticker-row { display: grid; grid-template-columns: 1fr 34px; gap: 6px; }
 .ticker-grid input {
   min-width: 0;
   min-height: 50px;
@@ -682,6 +748,14 @@ h2 { margin: 0; color: #fff; font-size: 28px; line-height: 1.1; }
   color: #fff;
   text-transform: uppercase;
   font-weight: 850;
+}
+.ticker-row button {
+  border-radius: 8px;
+  background: #FEE2E2;
+  color: #991B1B;
+  cursor: pointer;
+  font-size: 20px;
+  font-weight: 950;
 }
 .ticker-grid input:focus, .input-shell:focus-within {
   border-color: #00C9A7;
@@ -701,6 +775,30 @@ h2 { margin: 0; color: #fff; font-size: 28px; line-height: 1.1; }
   font-weight: 950;
 }
 .primary:disabled { cursor: not-allowed; opacity: 0.52; }
+.secondary, .view-toggle button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 40px;
+  border: 1px solid #D7E1DD;
+  border-radius: 8px;
+  background: #FFFFFF;
+  color: #050505;
+  cursor: pointer;
+  font-weight: 900;
+}
+.view-toggle {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  margin-bottom: 18px;
+}
+.view-toggle button.active {
+  border-color: #00A88C;
+  background: #E9F7F4;
+  color: #007C68;
+}
 .error {
   margin-top: 14px;
   padding: 12px;
@@ -776,6 +874,21 @@ h2 { margin: 0; color: #fff; font-size: 28px; line-height: 1.1; }
   line-height: 1;
 }
 .summary-row small { margin-top: 7px; text-transform: none; }
+.warning-list {
+  display: grid;
+  gap: 8px;
+}
+.warning-list p {
+  margin: 0;
+  border: 1px solid #F59E0B;
+  border-radius: 8px;
+  background: #FEF3C7;
+  color: #78350F;
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.4;
+  font-weight: 850;
+}
 .report-card { overflow: hidden; border-width: 2px; }
 .report-head {
   display: flex;
@@ -872,6 +985,15 @@ h2 { margin: 0; color: #fff; font-size: 28px; line-height: 1.1; }
 .bucket.core { background: rgba(34, 197, 94, 0.14); color: #86EFAC; }
 .bucket.growth { background: rgba(245, 158, 11, 0.16); color: #FCD34D; }
 .bucket.speculative { background: rgba(239, 68, 68, 0.16); color: #FCA5A5; }
+.plain-bucket {
+  justify-self: start;
+  border-radius: 999px;
+  background: #E9F7F4;
+  color: #007C68;
+  padding: 7px 10px;
+  font-size: 13px;
+  font-weight: 950;
+}
 .big-money strong {
   display: block;
   margin-top: 5px;
@@ -905,6 +1027,24 @@ h2 { margin: 0; color: #fff; font-size: 28px; line-height: 1.1; }
 }
 .watch-card strong { display: block; color: #FCA5A5; font-size: 22px; }
 .watch-card span { display: block; margin-top: 6px; color: #E0E0E0; font-weight: 800; }
+.buy-plan {
+  border: 1px solid #B7E5DC;
+  border-radius: 8px;
+  background: #E9F7F4;
+  padding: 14px;
+}
+.buy-plan strong {
+  display: block;
+  color: #007C68;
+  font-size: 17px;
+}
+.buy-plan span {
+  display: block;
+  margin-top: 5px;
+  color: #050505;
+  font-weight: 850;
+  line-height: 1.4;
+}
 .signal-banner {
   display: flex;
   align-items: center;
@@ -1084,6 +1224,7 @@ h1, h2, .hero-card strong, .metric-card strong, .summary-row strong, .stock-name
 .stock-card + .stock-card { border-top-color: #D7E1DD; }
 .summary-row strong, .scenario-card strong, .big-money strong { color: #007C68; }
 .signal-banner.green, .signal-banner.yellow, .signal-banner.red { color: #FFFFFF; }
+.watch-card span { color: #050505; }
 .confidence-bar span { background: #D7E1DD; }
 .confidence-bar span.filled { background: #00A88C; }
 .spin { animation: spin 900ms linear infinite; }
