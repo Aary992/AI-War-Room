@@ -35,6 +35,17 @@ type AllocationRow = {
   fallFromHighPercent: number | null;
   buySignal: BuySignal;
   riskBullets: string[];
+  canBuy: boolean;
+  watchMessage: string | null;
+  whyBucket: string;
+  whyAllocation: string;
+  whyBuyBelowPrice: string;
+  whySignal: string;
+  bullCaseTriggers: string[];
+  exitSignals: string[];
+  confidenceScore: number;
+  confidenceReason: string;
+  confidenceUpside: string;
 };
 
 type AllocationResponse = {
@@ -93,6 +104,22 @@ function scenarioValue(rows: AllocationRow[], bucket: Bucket, returnPercent: num
   return capital + bucketCapital * returnPercent;
 }
 
+function bucketAmount(rows: AllocationRow[], bucket: Bucket) {
+  return rows.filter((row) => row.bucket === bucket).reduce((sum, row) => sum + row.allocationAmount, 0);
+}
+
+function signalCount(rows: AllocationRow[], tone: BuySignal["tone"]) {
+  return rows.filter((row) => row.buySignal.tone === tone).length;
+}
+
+function portfolioVerdict(rows: AllocationRow[]) {
+  const buy = signalCount(rows, "green");
+  const accumulate = signalCount(rows, "yellow");
+  if (buy > 0) return `${buy} of your ${rows.length} stocks are near 52 week lows. Historically a strong time to accumulate slowly.`;
+  if (accumulate > 0) return `${accumulate} of your ${rows.length} stocks have cooled from highs. Staggered buying is better than rushing in.`;
+  return `Most selected stocks are still close to highs. Keep watchlisted capital ready and wait for better entries.`;
+}
+
 export default function Home() {
   const [capital, setCapital] = useState("500000");
   const [riskLevel, setRiskLevel] = useState<RiskLevel>("balanced");
@@ -128,8 +155,11 @@ export default function Home() {
     return totals;
   }, [result]);
 
-  const growthScenario = result ? scenarioValue(result.rows, "Growth", 0.4, result.capital) : 0;
   const coreScenario = result ? scenarioValue(result.rows, "Core", 0.15, result.capital) : 0;
+  const realisticScenario = result ? scenarioValue(result.rows, "Growth", 0.35, result.capital) : 0;
+  const bestCaseScenario = result
+    ? result.capital + bucketAmount(result.rows, "Core") * 0.15 + bucketAmount(result.rows, "Growth") * 0.35
+    : 0;
 
   async function generateAllocation(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -301,17 +331,31 @@ export default function Home() {
             </div>
           ) : (
             <>
-              <div className="summary-grid">
-                <div className="metric-card dark">
-                  <span>Total capital</span>
-                  <strong>{currency.format(result.capital)}</strong>
+              <section className="portfolio-summary">
+                <div>
+                  <p className="eyebrow">Portfolio Level Summary</p>
+                  <h2>{portfolioVerdict(result.rows)}</h2>
                 </div>
-                <div className="metric-card">
-                  <span>Generated plan</span>
-                  <strong>{result.rows.length} stocks</strong>
-                  <small>{riskLabels[result.riskLevel]} allocation</small>
+                <div className="summary-row">
+                  <div><span>Total capital</span><strong>{currency.format(result.capital)}</strong></div>
+                  <div><span>Stocks analysed</span><strong>{result.rows.length}</strong></div>
+                  <div><span>Risk profile</span><strong>{riskLabels[result.riskLevel]}</strong></div>
                 </div>
-              </div>
+                <div className="summary-row three">
+                  {(["Core", "Growth", "Speculative"] as Bucket[]).map((bucket) => (
+                    <div key={bucket}>
+                      <span>{bucket}</span>
+                      <strong>{bucketTotals[bucket].toFixed(1)}%</strong>
+                      <small>{currency.format(bucketAmount(result.rows, bucket))}</small>
+                    </div>
+                  ))}
+                </div>
+                <div className="summary-row three">
+                  <div><span>Buy zone</span><strong>{signalCount(result.rows, "green")}/{result.rows.length}</strong></div>
+                  <div><span>Accumulate</span><strong>{signalCount(result.rows, "yellow")}/{result.rows.length}</strong></div>
+                  <div><span>Wait zone</span><strong>{signalCount(result.rows, "red")}/{result.rows.length}</strong></div>
+                </div>
+              </section>
 
               <section className="report-card">
                 <div className="report-head">
@@ -323,6 +367,15 @@ export default function Home() {
                     <button type="button" onClick={downloadCsv}><Download size={15} aria-hidden /> CSV</button>
                     <button type="button" onClick={() => window.print()}><Printer size={15} aria-hidden /> Print</button>
                   </div>
+                </div>
+
+                <div className="report-summary">
+                  <span>{currency.format(result.capital)} capital</span>
+                  <span>{result.rows.length} stocks</span>
+                  <span>{riskLabels[result.riskLevel]}</span>
+                  <span>Core {bucketTotals.Core.toFixed(1)}%</span>
+                  <span>Growth {bucketTotals.Growth.toFixed(1)}%</span>
+                  <span>Speculative {bucketTotals.Speculative.toFixed(1)}%</span>
                 </div>
 
                 <div className="bucket-strip">
@@ -351,16 +404,23 @@ export default function Home() {
                         <strong>{row.formattedAmount}</strong>
                       </div>
 
-                      <div className="price-line">
-                        <div>
-                          <span>Shares to buy</span>
-                          <strong>{row.estimatedShares}</strong>
+                      {!row.canBuy ? (
+                        <div className="watch-card">
+                          <strong>Watch only</strong>
+                          <span>{row.watchMessage}</span>
                         </div>
-                        <div>
-                          <span>Buy below price</span>
-                          <strong>{priceFormat.format(row.buyBelowPrice)}</strong>
+                      ) : (
+                        <div className="price-line">
+                          <div>
+                            <span>Shares to buy</span>
+                            <strong>{row.estimatedShares}</strong>
+                          </div>
+                          <div>
+                            <span>Buy below price</span>
+                            <strong>{priceFormat.format(row.buyBelowPrice)}</strong>
+                          </div>
                         </div>
-                      </div>
+                      )}
 
                       <div className={`signal-banner ${row.buySignal.tone}`}>
                         <div>
@@ -371,12 +431,42 @@ export default function Home() {
 
                       <p className="signal-reason">{row.buySignal.reason}</p>
 
-                      <p className="bucket-reason">{bucketReason(row)}</p>
+                      <div className="reason-grid">
+                        <section><h3>Why this bucket</h3><p>{row.whyBucket}</p></section>
+                        <section><h3>Why this allocation percentage</h3><p>{row.whyAllocation}</p></section>
+                        <section><h3>Why this buy below price</h3><p>{row.whyBuyBelowPrice}</p></section>
+                        <section><h3>Why this signal</h3><p>{row.whySignal}</p></section>
+                      </div>
+
+                      <div className="confidence-box">
+                        <h3>Conviction: {row.confidenceScore}/10</h3>
+                        <div className="confidence-bar">
+                          {Array.from({ length: 10 }).map((_, index) => (
+                            <span key={index} className={index < row.confidenceScore ? "filled" : ""} />
+                          ))}
+                        </div>
+                        <p>{row.confidenceReason}</p>
+                        <small>{row.confidenceUpside}</small>
+                      </div>
 
                       <div className="risk-box">
                         <h3>Risk Snapshot</h3>
                         <ul>
                           {row.riskBullets.map((bullet) => <li key={bullet}>{bullet}</li>)}
+                        </ul>
+                      </div>
+
+                      <div className="risk-box">
+                        <h3>Bull Case Triggers</h3>
+                        <ul>
+                          {row.bullCaseTriggers.map((bullet) => <li key={bullet}>{bullet}</li>)}
+                        </ul>
+                      </div>
+
+                      <div className="risk-box">
+                        <h3>Exit Signal</h3>
+                        <ul>
+                          {row.exitSignals.map((bullet) => <li key={bullet}>{bullet}</li>)}
                         </ul>
                       </div>
                     </article>
@@ -389,12 +479,16 @@ export default function Home() {
                 <h2>If This Goes Right</h2>
                 <div className="scenario-grid">
                   <div className="scenario-card">
-                    <span>If your Growth picks return 40% in 12 months {"\u2192"} Portfolio becomes</span>
-                    <strong>{currency.format(growthScenario)}</strong>
+                    <span>Conservative: if all Core stocks return 15% in 12 months</span>
+                    <strong>{currency.format(coreScenario)}</strong>
                   </div>
                   <div className="scenario-card">
-                    <span>If your Core picks return 15% in 12 months {"\u2192"} Portfolio becomes</span>
-                    <strong>{currency.format(coreScenario)}</strong>
+                    <span>Realistic: if all Growth stocks return 35% in 12 months</span>
+                    <strong>{currency.format(realisticScenario)}</strong>
+                  </div>
+                  <div className="scenario-card">
+                    <span>Best Case: if Core and Growth hit together</span>
+                    <strong>{currency.format(bestCaseScenario)}</strong>
                   </div>
                 </div>
               </section>
@@ -462,7 +556,7 @@ h2 { margin: 0; color: #fff; font-size: 28px; line-height: 1.1; }
   font-size: 18px;
   line-height: 1.55;
 }
-.hero-card, .empty-panel, .loading-panel, .report-card, .metric-card, .scenario-section, .stock-card {
+.hero-card, .empty-panel, .loading-panel, .report-card, .metric-card, .scenario-section, .stock-card, .portfolio-summary {
   border: 1px solid #1E2D4A;
   border-radius: 8px;
   background: #141B2D;
@@ -624,6 +718,39 @@ h2 { margin: 0; color: #fff; font-size: 28px; line-height: 1.1; }
 .summary-grid { display: grid; grid-template-columns: 1.1fr 1fr; gap: 12px; }
 .metric-card { padding: 16px; }
 .metric-card.dark { background: linear-gradient(135deg, #00C9A7, #141B2D); color: #fff; }
+.portfolio-summary {
+  display: grid;
+  gap: 16px;
+  padding: 22px;
+  background: linear-gradient(135deg, rgba(0, 201, 167, 0.28), #141B2D 58%);
+}
+.portfolio-summary h2 { max-width: 920px; font-size: clamp(24px, 3vw, 38px); }
+.summary-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.summary-row div {
+  border: 1px solid #1E2D4A;
+  border-radius: 8px;
+  background: rgba(15, 22, 40, 0.72);
+  padding: 14px;
+}
+.summary-row span, .summary-row small {
+  display: block;
+  color: #AAB4C5;
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+.summary-row strong {
+  display: block;
+  margin-top: 7px;
+  color: #fff;
+  font-size: 24px;
+  line-height: 1;
+}
+.summary-row small { margin-top: 7px; text-transform: none; }
 .report-card { overflow: hidden; border-width: 2px; }
 .report-head {
   display: flex;
@@ -654,11 +781,32 @@ h2 { margin: 0; color: #fff; font-size: 28px; line-height: 1.1; }
   border-radius: 999px;
   background: #0F1628;
 }
+.report-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 18px 26px 0;
+}
+.report-summary span {
+  border: 1px solid #1E2D4A;
+  border-radius: 999px;
+  background: #0F1628;
+  color: #E0E0E0;
+  padding: 7px 10px;
+  font-size: 12px;
+  font-weight: 900;
+}
 .bucket-fill.core, .dot.core { background: #22C55E; }
 .bucket-fill.growth, .dot.growth { background: #F59E0B; }
 .bucket-fill.speculative, .dot.speculative { background: #EF4444; }
-.stock-grid { display: grid; gap: 16px; padding: 24px 26px 26px; }
-.stock-card { display: grid; gap: 16px; padding: 20px; }
+.stock-grid { display: grid; gap: 20px; padding: 24px 26px 26px; }
+.stock-card {
+  display: grid;
+  gap: 16px;
+  padding: 22px;
+  border-left: 4px solid #00C9A7;
+}
+.stock-card + .stock-card { border-top: 1px solid #1E2D4A; }
 .stock-head {
   display: flex;
   align-items: flex-start;
@@ -666,9 +814,10 @@ h2 { margin: 0; color: #fff; font-size: 28px; line-height: 1.1; }
   gap: 12px;
 }
 .stock-name { display: grid; gap: 4px; }
-.stock-name strong { color: #fff; font-size: 26px; }
+.stock-name strong { color: #fff; font-size: clamp(28px, 3vw, 40px); }
 .stock-name span {
   color: #AAB4C5;
+  font-size: 20px;
   font-weight: 750;
   white-space: normal;
   overflow-wrap: break-word;
@@ -723,6 +872,14 @@ h2 { margin: 0; color: #fff; font-size: 28px; line-height: 1.1; }
   font-size: 23px;
   font-variant-numeric: tabular-nums;
 }
+.watch-card {
+  border: 1px solid rgba(252, 165, 165, 0.34);
+  border-radius: 8px;
+  background: rgba(239, 68, 68, 0.12);
+  padding: 16px;
+}
+.watch-card strong { display: block; color: #FCA5A5; font-size: 22px; }
+.watch-card span { display: block; margin-top: 6px; color: #E0E0E0; font-weight: 800; }
 .signal-banner {
   display: flex;
   align-items: center;
@@ -744,7 +901,46 @@ h2 { margin: 0; color: #fff; font-size: 28px; line-height: 1.1; }
   line-height: 1.45;
   font-weight: 750;
 }
-.bucket-reason { margin: 0; color: #E0E0E0; font-size: 15px; font-weight: 850; }
+.reason-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.reason-grid section, .confidence-box {
+  border: 1px solid #1E2D4A;
+  border-radius: 8px;
+  background: #0F1628;
+  padding: 14px;
+}
+.reason-grid h3, .confidence-box h3, .risk-box h3 {
+  border-left: 3px solid #00C9A7;
+  padding-left: 10px;
+}
+.reason-grid h3, .confidence-box h3 {
+  margin: 0 0 8px;
+  color: #fff;
+  font-size: 16px;
+}
+.reason-grid p, .confidence-box p, .confidence-box small {
+  margin: 0;
+  color: #AAB4C5;
+  font-size: 14px;
+  line-height: 1.45;
+  font-weight: 750;
+}
+.confidence-box small { display: block; margin-top: 8px; color: #7F8AA3; }
+.confidence-bar {
+  display: grid;
+  grid-template-columns: repeat(10, 1fr);
+  gap: 5px;
+  margin-bottom: 10px;
+}
+.confidence-bar span {
+  height: 10px;
+  border-radius: 999px;
+  background: #263550;
+}
+.confidence-bar span.filled { background: #00C9A7; }
 .risk-box {
   border: 1px solid #1E2D4A;
   border-radius: 8px;
@@ -763,7 +959,7 @@ h2 { margin: 0; color: #fff; font-size: 28px; line-height: 1.1; }
   font-weight: 750;
 }
 .scenario-section { display: grid; gap: 16px; padding: 22px; }
-.scenario-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.scenario-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .scenario-card {
   border: 1px solid #1E2D4A;
   border-radius: 8px;
@@ -801,7 +997,7 @@ h2 { margin: 0; color: #fff; font-size: 28px; line-height: 1.1; }
 .spin { animation: spin 900ms linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (max-width: 1120px) {
-  .hero, .layout, .summary-grid, .scenario-grid { grid-template-columns: 1fr; }
+  .hero, .layout, .summary-grid, .scenario-grid, .summary-row, .reason-grid { grid-template-columns: 1fr; }
   .form-card { position: static; }
 }
 @media (max-width: 680px) {

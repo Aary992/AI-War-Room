@@ -162,8 +162,15 @@ const SECTOR_MAP: Record<string, string> = {
   DIXON: "Electronics manufacturing",
   ITC: "Consumer goods and hotels",
   BHARTIARTL: "Telecom",
+  IDEA: "Telecom",
+  E2E: "Cloud infrastructure and data centres",
   MARUTI: "Automobiles",
   SUNPHARMA: "Pharmaceuticals"
+};
+
+const COMPANY_NAME_OVERRIDES: Record<string, string> = {
+  IDEA: "Vodafone Idea",
+  E2E: "E2E Networks"
 };
 
 function isRiskLevel(value: unknown): value is RiskLevel {
@@ -378,7 +385,12 @@ function distanceFromLow(profile: StockProfile) {
   return Math.max(0, ((profile.price - profile.fiftyTwoWeekLow) / profile.fiftyTwoWeekLow) * 100);
 }
 
-function buySignalFor(profile: StockProfile) {
+function buySignalFor(profile: StockProfile): {
+  label: string;
+  tone: "green" | "yellow" | "red";
+  detail: string;
+  reason: string;
+} {
   const fall = fallFromHigh(profile) ?? 0;
   const lowDistance = distanceFromLow(profile) ?? 100;
 
@@ -386,7 +398,7 @@ function buySignalFor(profile: StockProfile) {
     return {
       label: "\u{1F7E2} Strong Buy Zone",
       tone: "green",
-      detail: "Price is near its 52 week low.",
+      detail: `${profile.requestedTicker} is ${lowDistance.toFixed(0)}% above its 52 week low.`,
       reason: `${profile.requestedTicker} is only ${lowDistance.toFixed(0)}% above its 52 week low in ${profile.sector}.`
     };
   }
@@ -395,7 +407,7 @@ function buySignalFor(profile: StockProfile) {
     return {
       label: "\u{1F7E1} Good Entry \u2014 Buy In Parts",
       tone: "yellow",
-      detail: "Good for staggered entry.",
+      detail: `${profile.requestedTicker} is ${fall.toFixed(0)}% below its 52 week high.`,
       reason: `${profile.requestedTicker} is ${fall.toFixed(0)}% below its 52 week high, but not near yearly lows yet.`
     };
   }
@@ -404,7 +416,7 @@ function buySignalFor(profile: StockProfile) {
     return {
       label: "\u{1F534} Too Expensive \u2014 Wait For A Dip",
       tone: "red",
-      detail: "Wait for a better entry.",
+      detail: `${profile.requestedTicker} is within 10% of its 52 week high.`,
       reason: `${profile.requestedTicker} is close to its 52 week high, so entry risk is higher.`
     };
   }
@@ -412,9 +424,71 @@ function buySignalFor(profile: StockProfile) {
   return {
     label: "\u{1F7E1} Good Entry \u2014 Buy In Parts",
     tone: "yellow",
-    detail: "Good for staggered entry.",
+    detail: `${profile.requestedTicker} has cooled from highs but is not deeply cheap.`,
     reason: `${profile.requestedTicker} has cooled from its high, but is not deeply cheap yet.`
   };
+}
+
+function calculateBuyBelowPrice(profile: StockProfile, allocationAmount: number) {
+  const low = profile.fiftyTwoWeekLow ?? profile.price * 0.85;
+  const fall = fallFromHigh(profile) ?? 0;
+  const midpointMinusFive = ((low + profile.price) / 2) * 0.95;
+  const maxDiscountFloor = fall > 40 ? low : profile.price * 0.7;
+  const affordableCap = allocationAmount >= profile.price ? allocationAmount : profile.price;
+  return Number(Math.min(Math.max(midpointMinusFive, low, maxDiscountFloor), profile.price, affordableCap).toFixed(2));
+}
+
+function marketCapLabel(profile: StockProfile) {
+  if (!profile.marketCap) return "market-cap data is limited";
+  if (profile.marketCap >= 5_000_000_000_000) return "mega-cap scale";
+  if (profile.marketCap >= 1_000_000_000_000) return "large-cap scale";
+  if (profile.marketCap >= 250_000_000_000) return "mid-cap scale";
+  return "smaller market-cap scale";
+}
+
+function whyBucket(profile: StockProfile) {
+  const volatility = profile.annualVolatility ? `${Math.round(profile.annualVolatility * 100)}% annual volatility` : "limited volatility history";
+  if (profile.bucket === "Core") {
+    return `${profile.name} is placed in Core because it has ${marketCapLabel(profile)}, a steadier ${profile.sector} business, and ${volatility}.`;
+  }
+  if (profile.bucket === "Growth") {
+    return `${profile.name} is placed in Growth because its ${profile.sector} profile offers upside, with ${marketCapLabel(profile)} and ${volatility}.`;
+  }
+  return `${profile.name} is placed in Speculative because its ${profile.sector} exposure and ${volatility} make position sizing more important.`;
+}
+
+function whyAllocation(profile: StockProfile, riskLevel: RiskLevel, allocationPercent: number) {
+  return `${allocationPercent.toFixed(1)}% was chosen because the ${riskLevel} profile weights ${profile.bucket} stocks this way after adjusting for ${profile.name}'s liquidity and volatility.`;
+}
+
+function whyBuyBelow(profile: StockProfile, buyBelowPrice: number) {
+  const low = profile.fiftyTwoWeekLow ? INR_FORMATTER.format(profile.fiftyTwoWeekLow) : "the estimated yearly low";
+  return `${INR_FORMATTER.format(buyBelowPrice)} uses the midpoint between current price and ${low}, minus 5%, while staying above the 52 week low.`;
+}
+
+function confidenceScore(profile: StockProfile, signalTone: "green" | "yellow" | "red") {
+  const lowDistance = distanceFromLow(profile) ?? 60;
+  const peGap =
+    profile.currentPE && profile.fiveYearAveragePE
+      ? ((profile.fiveYearAveragePE - profile.currentPE) / profile.fiveYearAveragePE) * 100
+      : 0;
+  let score = profile.bucket === "Core" ? 5 : profile.bucket === "Growth" ? 4 : 3;
+  if (lowDistance <= 10) score += 2;
+  else if (lowDistance <= 20) score += 1;
+  if (peGap > 15) score += 1;
+  if (signalTone === "green") score += 2;
+  if (signalTone === "yellow") score += 1;
+  if (signalTone === "red") score -= 2;
+  return Math.round(clamp(score, 1, 10));
+}
+
+function confidenceExplanation(profile: StockProfile, score: number) {
+  const lowDistance = distanceFromLow(profile);
+  return `Conviction is ${score}/10 because ${profile.name} is ${lowDistance !== null ? `${lowDistance.toFixed(0)}% above its 52 week low` : "missing complete 52 week low data"} in ${profile.sector}.`;
+}
+
+function confidenceUpside(profile: StockProfile) {
+  return `The score would improve if ${profile.name} moves closer to its 52 week low while earnings and sector data stay stable.`;
 }
 
 function riskBulletsFor(profile: StockProfile) {
@@ -471,6 +545,16 @@ function riskBulletsFor(profile: StockProfile) {
       "Dixon depends on electronics manufacturing demand.",
       "Client losses can quickly hit factory utilisation.",
       "Government incentive changes can affect profits."
+    ],
+    IDEA: [
+      "Vodafone Idea's telecom business depends on raising tariffs enough to fund 4G and 5G network upgrades.",
+      "Vodafone Idea carries heavy debt and AGR dues that can limit shareholder upside.",
+      "Vodafone Idea can lose subscribers if Jio and Airtel keep stronger network coverage in key circles."
+    ],
+    E2E: [
+      "E2E Networks depends on GPU cloud and data-centre capacity being filled by AI customers.",
+      "E2E Networks can be hurt if Nvidia GPU supply, power costs, or data-centre capex become unfavourable.",
+      "E2E Networks faces concentration risk if large cloud customers shift workloads to hyperscalers."
     ],
     HCLTECH: [
       "HCLTech depends on large enterprise technology transformation budgets.",
@@ -573,6 +657,53 @@ function riskBulletsFor(profile: StockProfile) {
     `${company} can swing heavily because smaller ${profile.sector} names react fast to news.`,
     `${company} needs close tracking after purchase because liquidity and sentiment can change quickly.`,
     `${company} can fall fast if investors reduce exposure to riskier ${profile.sector} stocks.`
+  ];
+}
+
+function bullCaseTriggersFor(profile: StockProfile) {
+  const ticker = baseTicker(profile.symbol);
+  const triggers: Record<string, string[]> = {
+    TCS: [
+      "US rate cuts could revive banking technology budgets at TCS's largest clients.",
+      "A rebound in large digital transformation deals would lift TCS order visibility.",
+      "Stable attrition and better utilisation could expand TCS operating margins."
+    ],
+    INFY: [
+      "Infosys can rerate if large deal wins accelerate across US and European clients.",
+      "Stronger discretionary tech spending would improve Infosys revenue growth.",
+      "Margin recovery from automation and utilisation gains would support Infosys earnings."
+    ],
+    IDEA: [
+      "Vodafone Idea can move sharply if tariff hikes improve average revenue per user.",
+      "Fresh funding or government relief can strengthen Vodafone Idea's network investment plan.",
+      "Subscriber losses slowing versus Airtel and Jio would improve Vodafone Idea sentiment."
+    ],
+    E2E: [
+      "E2E Networks can rise if demand for Indian AI GPU cloud capacity keeps outstripping supply.",
+      "New enterprise AI customers signing long-duration contracts would improve E2E revenue visibility.",
+      "Higher utilisation of E2E's GPU and data-centre assets would expand operating leverage."
+    ],
+    RELIANCE: [
+      "Reliance can rerate if Jio monetisation and retail growth accelerate together.",
+      "A demerger or listing event for consumer businesses could unlock Reliance value.",
+      "Improved refining margins would add upside to Reliance's energy cash flows."
+    ]
+  };
+
+  if (triggers[ticker]) return triggers[ticker];
+  return [
+    `${profile.name} can move higher if ${profile.sector} demand improves over the next few quarters.`,
+    `${profile.name} can rerate if revenue growth beats expectations while margins remain stable.`,
+    `${profile.name} can attract fresh buying if institutional liquidity improves near the suggested entry zone.`
+  ];
+}
+
+function exitSignalsFor(profile: StockProfile, buyBelowPrice: number) {
+  const target = buyBelowPrice * 1.25;
+  const low = profile.fiftyTwoWeekLow ?? buyBelowPrice * 0.9;
+  return [
+    `Consider taking profits near ${INR_FORMATTER.format(target)}, which is 25% above the buy-below price.`,
+    `Cut the thesis if ${profile.name} breaks below its 52 week low near ${INR_FORMATTER.format(low)} on high volume.`
   ];
 }
 
@@ -731,7 +862,7 @@ function allocate({
       estimatedShares: profile.price > 0 ? Math.floor(amount / profile.price) : 0,
       currentPrice: profile.price,
       estimatedFairValue: Number(profile.fairValue.toFixed(2)),
-      buyBelowPrice: Number(((profile.fiftyTwoWeekLow ?? profile.price * 0.85) * 1.1).toFixed(2)),
+      buyBelowPrice: calculateBuyBelowPrice(profile, amount),
       entryZoneLow: Number(zoneLow.toFixed(2)),
       entryZoneHigh: Number(zoneHigh.toFixed(2)),
       entryZone: `${INR_FORMATTER.format(zoneLow)} - ${INR_FORMATTER.format(zoneHigh)}`,
@@ -747,7 +878,24 @@ function allocate({
       fiveYearAveragePE: profile.fiveYearAveragePE,
       fallFromHighPercent: fallFromHigh(profile) !== null ? Number((fallFromHigh(profile) as number).toFixed(1)) : null,
       buySignal: buySignalFor(profile),
-      riskBullets: riskBulletsFor(profile)
+      riskBullets: riskBulletsFor(profile),
+      canBuy: amount >= profile.price,
+      watchMessage: amount < profile.price ? "Capital too low to buy even 1 share at current price. Watch this stock and add capital later." : null,
+      whyBucket: whyBucket(profile),
+      whyAllocation: whyAllocation(profile, riskLevel, roundedPercentage),
+      bullCaseTriggers: bullCaseTriggersFor(profile)
+    };
+  }).map((row) => {
+    const profile = profiles.find((item) => item.symbol === row.resolvedSymbol) as StockProfile;
+    const score = confidenceScore(profile, row.buySignal.tone);
+    return {
+      ...row,
+      whyBuyBelowPrice: whyBuyBelow(profile, row.buyBelowPrice),
+      whySignal: row.buySignal.reason,
+      exitSignals: exitSignalsFor(profile, row.buyBelowPrice),
+      confidenceScore: score,
+      confidenceReason: confidenceExplanation(profile, score),
+      confidenceUpside: confidenceUpside(profile)
     };
   });
 }
