@@ -1,0 +1,12 @@
+.next
+node_modules
+out
+.env*
+.vercel-cli-data
+npm-debug.log*
+dev-server.log
+local-preview.log
+run-local.log
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*

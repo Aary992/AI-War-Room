@@ -1,0 +1,821 @@
+"use client";
+
+import {
+  CircleDollarSign,
+  Download,
+  Loader2,
+  MessageCircle,
+  Printer,
+  Send,
+  Target
+} from "lucide-react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
+
+type RiskLevel = "safe" | "balanced" | "aggressive";
+type Bucket = "Core" | "Growth" | "Speculative";
+
+type BuySignal = {
+  label: string;
+  tone: "green" | "yellow" | "red";
+  detail: string;
+  reason: string;
+};
+
+type AllocationRow = {
+  ticker: string;
+  resolvedSymbol: string;
+  name: string;
+  bucket: Bucket;
+  allocationPercent: number;
+  allocationAmount: number;
+  formattedAmount: string;
+  estimatedShares: number;
+  currentPrice: number;
+  buyBelowPrice: number;
+  fallFromHighPercent: number | null;
+  buySignal: BuySignal;
+  riskBullets: string[];
+};
+
+type AllocationResponse = {
+  generatedAt: string;
+  capital: number;
+  formattedCapital: string;
+  riskLevel: RiskLevel;
+  rows: AllocationRow[];
+};
+
+const currency = new Intl.NumberFormat("en-IN", {
+  style: "currency",
+  currency: "INR",
+  maximumFractionDigits: 0
+});
+
+const priceFormat = new Intl.NumberFormat("en-IN", {
+  style: "currency",
+  currency: "INR",
+  maximumFractionDigits: 2
+});
+
+const riskLabels: Record<RiskLevel, string> = {
+  safe: "Play It Safe",
+  balanced: "Mix It Up",
+  aggressive: "Maximum Upside"
+};
+
+const riskDescriptions: Record<RiskLevel, string> = {
+  safe: "Slow and steady. Protect your money first.",
+  balanced: "Some safety, some growth. Best of both.",
+  aggressive: "Higher risk. Higher reward. Go big."
+};
+
+const loadingMessages = [
+  "Fetching live market data...",
+  "Analysing your stocks...",
+  "Building your allocation...",
+  "Almost ready..."
+];
+
+function bucketClass(bucket: Bucket) {
+  return bucket.toLowerCase();
+}
+
+function bucketReason(row: AllocationRow) {
+  if (row.bucket === "Core") return "Large stable company. Good anchor for long term portfolios.";
+  if (row.bucket === "Growth") return "Growing company. Better upside, but price can move fast.";
+  return "Riskier stock. Keep position smaller and monitor closely.";
+}
+
+function scenarioValue(rows: AllocationRow[], bucket: Bucket, returnPercent: number, capital: number) {
+  const bucketCapital = rows
+    .filter((row) => row.bucket === bucket)
+    .reduce((sum, row) => sum + row.allocationAmount, 0);
+  return capital + bucketCapital * returnPercent;
+}
+
+export default function Home() {
+  const [capital, setCapital] = useState("500000");
+  const [riskLevel, setRiskLevel] = useState<RiskLevel>("balanced");
+  const [tickers, setTickers] = useState(["", "", "", "", ""]);
+  const [result, setResult] = useState<AllocationResponse | null>(null);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [loadingIndex, setLoadingIndex] = useState(0);
+
+  useEffect(() => {
+    if (!loading) {
+      setLoadingIndex(0);
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      setLoadingIndex((current) => (current + 1) % loadingMessages.length);
+    }, 2000);
+
+    return () => window.clearInterval(interval);
+  }, [loading]);
+
+  const cleanTickers = useMemo(
+    () => tickers.map((ticker) => ticker.trim().toUpperCase()).filter(Boolean),
+    [tickers]
+  );
+
+  const bucketTotals = useMemo(() => {
+    const totals: Record<Bucket, number> = { Core: 0, Growth: 0, Speculative: 0 };
+    result?.rows.forEach((row) => {
+      totals[row.bucket] += row.allocationPercent;
+    });
+    return totals;
+  }, [result]);
+
+  const growthScenario = result ? scenarioValue(result.rows, "Growth", 0.4, result.capital) : 0;
+  const coreScenario = result ? scenarioValue(result.rows, "Core", 0.15, result.capital) : 0;
+
+  async function generateAllocation(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setLoading(true);
+    setError("");
+    const startedAt = Date.now();
+
+    try {
+      const response = await fetch("/api/allocate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          capital: Number(capital),
+          riskLevel,
+          horizon: "medium",
+          cashReservePercent: 0,
+          maxPositionPercent: 40,
+          trancheCount: 1,
+          tickers: cleanTickers
+        })
+      });
+
+      const data = await response.json();
+      await new Promise((resolve) => setTimeout(resolve, Math.max(0, 3000 - (Date.now() - startedAt))));
+
+      if (!response.ok) throw new Error(data.error ?? "Could not generate allocation.");
+      setResult(data);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Could not generate allocation.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function updateTicker(index: number, value: string) {
+    setTickers((current) =>
+      current.map((ticker, currentIndex) =>
+        currentIndex === index ? value.toUpperCase().replace(/\s/g, "") : ticker
+      )
+    );
+  }
+
+  function downloadCsv() {
+    if (!result) return;
+    const headers = ["Ticker", "Company", "Signal", "Bucket", "Allocation %", "Amount", "Shares", "Buy Below", "Current Price", "Fall From High"];
+    const rows = result.rows.map((row) => [
+      row.ticker,
+      row.name,
+      row.buySignal.label,
+      row.bucket,
+      row.allocationPercent,
+      row.allocationAmount,
+      row.estimatedShares,
+      row.buyBelowPrice,
+      row.currentPrice,
+      row.fallFromHighPercent ?? ""
+    ]);
+    const csv = [headers, ...rows]
+      .map((line) => line.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(","))
+      .join("\n");
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = "war-room-allocation.csv";
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function shareOnWhatsApp() {
+    const toolUrl = typeof window === "undefined" ? "the deployed tool" : window.location.origin;
+    const message = `Just used the War Room Allocator by Aarit Shah to plan my portfolio. Try it here: ${toolUrl}`;
+    window.open(`https://wa.me/?text=${encodeURIComponent(message)}`, "_blank", "noopener,noreferrer");
+  }
+
+  return (
+    <main className="war-room">
+      <style>{pageCss}</style>
+
+      <section className="hero">
+        <div>
+          <p className="eyebrow">Stock allocation planner</p>
+          <h1>War Room Allocator {"\u2014"} by Aarit Shah</h1>
+          <p className="subhead">
+            Enter capital, risk level, and up to five tickers. Get an allocation plan
+            with intelligent entry signals, buy-below prices, and stock-specific risks.
+          </p>
+        </div>
+        <div className="hero-card">
+          <span>Current setup</span>
+          <strong>{riskLabels[riskLevel]}</strong>
+          <small>{riskDescriptions[riskLevel]} | {cleanTickers.length}/5 stocks</small>
+        </div>
+      </section>
+
+      <section className="layout">
+        <form className="form-card" onSubmit={generateAllocation}>
+          <div className="card-title">
+            <Target size={18} aria-hidden />
+            Inputs
+          </div>
+
+          <label className="field">
+            <span>Total capital</span>
+            <div className="input-shell">
+              <CircleDollarSign size={18} aria-hidden />
+              <b>INR</b>
+              <input
+                inputMode="numeric"
+                min="1"
+                value={capital}
+                onChange={(event) => setCapital(event.target.value.replace(/[^\d.]/g, ""))}
+                placeholder="500000"
+              />
+            </div>
+          </label>
+
+          <div className="risk-field">
+            <span>Risk level</span>
+            <div className="risk-options">
+              {(["safe", "balanced", "aggressive"] as RiskLevel[]).map((risk) => (
+                <button
+                  key={risk}
+                  className={riskLevel === risk ? "active" : ""}
+                  type="button"
+                  onClick={() => setRiskLevel(risk)}
+                >
+                  <strong>{riskLabels[risk]}</strong>
+                  <small>{riskDescriptions[risk]}</small>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="field">
+            <span>Stock tickers</span>
+            <div className="ticker-grid">
+              {tickers.map((ticker, index) => (
+                <input
+                  key={index}
+                  aria-label={`Ticker ${index + 1}`}
+                  value={ticker}
+                  onChange={(event) => updateTicker(index, event.target.value)}
+                  placeholder="TICKER"
+                  maxLength={18}
+                />
+              ))}
+            </div>
+          </div>
+
+          <button className="primary" type="submit" disabled={loading || cleanTickers.length === 0}>
+            {loading ? <Loader2 className="spin" size={18} aria-hidden /> : <Send size={18} aria-hidden />}
+            {loading ? "Analysing your portfolio..." : "Generate allocation"}
+          </button>
+          {error ? <div className="error">{error}</div> : null}
+        </form>
+
+        <section className="output">
+          {loading ? (
+            <div className="loading-panel">
+              <div className="pulse-dots"><span /><span /><span /></div>
+              <strong>{loadingMessages[loadingIndex]}</strong>
+              <small>War Room is reading the market data.</small>
+            </div>
+          ) : !result ? (
+            <div className="empty-panel">
+              <strong>Your personalised portfolio plan</strong>
+              <span>Enter your details and hit generate</span>
+              <small>Results appear here in seconds</small>
+            </div>
+          ) : (
+            <>
+              <div className="summary-grid">
+                <div className="metric-card dark">
+                  <span>Total capital</span>
+                  <strong>{currency.format(result.capital)}</strong>
+                </div>
+                <div className="metric-card">
+                  <span>Generated plan</span>
+                  <strong>{result.rows.length} stocks</strong>
+                  <small>{riskLabels[result.riskLevel]} allocation</small>
+                </div>
+              </div>
+
+              <section className="report-card">
+                <div className="report-head">
+                  <div>
+                    <p className="eyebrow">Allocation report</p>
+                    <h2>{riskLabels[result.riskLevel]} portfolio plan</h2>
+                  </div>
+                  <div className="action-row">
+                    <button type="button" onClick={downloadCsv}><Download size={15} aria-hidden /> CSV</button>
+                    <button type="button" onClick={() => window.print()}><Printer size={15} aria-hidden /> Print</button>
+                  </div>
+                </div>
+
+                <div className="bucket-strip">
+                  {(Object.keys(bucketTotals) as Bucket[]).map((bucket) => (
+                    <span key={bucket} className={`bucket-fill ${bucketClass(bucket)}`} style={{ width: `${bucketTotals[bucket]}%` }} />
+                  ))}
+                </div>
+
+                <div className="stock-grid">
+                  {result.rows.map((row) => (
+                    <article className="stock-card" key={row.resolvedSymbol}>
+                      <div className="stock-head">
+                        <div className="stock-name">
+                          <strong>{row.ticker}</strong>
+                          <span>{row.name}</span>
+                        </div>
+                        <span className="fall-badge">
+                          {"\u25BC"} {row.fallFromHighPercent !== null ? row.fallFromHighPercent.toFixed(0) : "0"}% from high
+                        </span>
+                      </div>
+
+                      <span className={`bucket ${bucketClass(row.bucket)}`}>{row.bucket}</span>
+
+                      <div className="big-money">
+                        <span>Allocate</span>
+                        <strong>{row.formattedAmount}</strong>
+                      </div>
+
+                      <div className="price-line">
+                        <div>
+                          <span>Shares to buy</span>
+                          <strong>{row.estimatedShares}</strong>
+                        </div>
+                        <div>
+                          <span>Buy below price</span>
+                          <strong>{priceFormat.format(row.buyBelowPrice)}</strong>
+                        </div>
+                      </div>
+
+                      <div className={`signal-banner ${row.buySignal.tone}`}>
+                        <div>
+                          <strong>{row.buySignal.label}</strong>
+                        </div>
+                        <span>{row.buySignal.detail}</span>
+                      </div>
+
+                      <p className="signal-reason">{row.buySignal.reason}</p>
+
+                      <p className="bucket-reason">{bucketReason(row)}</p>
+
+                      <div className="risk-box">
+                        <h3>Risk Snapshot</h3>
+                        <ul>
+                          {row.riskBullets.map((bullet) => <li key={bullet}>{bullet}</li>)}
+                        </ul>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </section>
+
+              <section className="scenario-section">
+                <p className="eyebrow">If This Goes Right</p>
+                <h2>If This Goes Right</h2>
+                <div className="scenario-grid">
+                  <div className="scenario-card">
+                    <span>If your Growth picks return 40% in 12 months {"\u2192"} Portfolio becomes</span>
+                    <strong>{currency.format(growthScenario)}</strong>
+                  </div>
+                  <div className="scenario-card">
+                    <span>If your Core picks return 15% in 12 months {"\u2192"} Portfolio becomes</span>
+                    <strong>{currency.format(coreScenario)}</strong>
+                  </div>
+                </div>
+              </section>
+
+              <button className="whatsapp-button" type="button" onClick={shareOnWhatsApp}>
+                <MessageCircle size={20} aria-hidden />
+                Share My Allocation
+              </button>
+
+              <p className="legal-disclaimer">
+                This tool is for educational purposes only. Nothing here is financial advice or a recommendation to buy or sell any security. Outputs are AI-generated and may be inaccurate. Past performance does not guarantee future results. Consult a SEBI registered investment advisor before investing. The creator holds no liability for any financial decisions made using this tool.
+              </p>
+            </>
+          )}
+        </section>
+      </section>
+    </main>
+  );
+}
+
+const pageCss = `
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: #0A0F1E;
+  color: #E0E0E0;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+button, input { font: inherit; }
+button { border: 0; }
+.war-room {
+  min-height: 100vh;
+  padding: 28px;
+  background: #0A0F1E;
+}
+.hero, .layout { width: min(1480px, 100%); margin: 0 auto; }
+.hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  align-items: end;
+  gap: 24px;
+  padding: 16px 0 26px;
+}
+.eyebrow {
+  margin: 0 0 8px;
+  color: #00C9A7;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+h1 {
+  max-width: 900px;
+  margin: 0 0 12px;
+  color: #fff;
+  font-size: clamp(42px, 5.6vw, 78px);
+  line-height: 0.94;
+  letter-spacing: 0;
+}
+h2 { margin: 0; color: #fff; font-size: 28px; line-height: 1.1; }
+.subhead {
+  max-width: 760px;
+  margin: 0;
+  color: #AAB4C5;
+  font-size: 18px;
+  line-height: 1.55;
+}
+.hero-card, .empty-panel, .loading-panel, .report-card, .metric-card, .scenario-section, .stock-card {
+  border: 1px solid #1E2D4A;
+  border-radius: 8px;
+  background: #141B2D;
+  box-shadow: 0 22px 70px rgba(0, 0, 0, 0.28);
+}
+.hero-card { padding: 18px; }
+.hero-card span, .metric-card span, .scenario-card span, .big-money span, .price-line span {
+  display: block;
+  color: #AAB4C5;
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+.hero-card strong, .metric-card strong {
+  display: block;
+  margin-top: 8px;
+  color: #fff;
+  font-size: 30px;
+  line-height: 1;
+}
+.hero-card small, .metric-card small { display: block; margin-top: 8px; color: #AAB4C5; font-weight: 700; }
+.layout {
+  display: grid;
+  grid-template-columns: 390px minmax(0, 1fr);
+  gap: 22px;
+  align-items: start;
+}
+.form-card {
+  position: sticky;
+  top: 24px;
+  border: 1px solid #1E2D4A;
+  border-radius: 8px;
+  background: #0F1628;
+  padding: 22px;
+  box-shadow: 0 22px 70px rgba(0, 0, 0, 0.28);
+}
+.card-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 18px;
+  color: #00C9A7;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.field, .risk-field { display: grid; gap: 8px; margin-bottom: 18px; }
+.field > span, .risk-field > span { color: #E0E0E0; font-size: 13px; font-weight: 900; }
+.input-shell {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 56px;
+  padding: 0 14px;
+  border: 1px solid #1E2D4A;
+  border-radius: 8px;
+  background: #141B2D;
+}
+.input-shell b { color: #AAB4C5; font-size: 12px; }
+.input-shell input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #fff;
+  font-size: 20px;
+  font-weight: 850;
+}
+.risk-options { display: grid; gap: 8px; }
+.risk-options button {
+  display: grid;
+  gap: 4px;
+  min-height: 62px;
+  padding: 12px;
+  border: 1px solid #1E2D4A;
+  border-radius: 8px;
+  background: #141B2D;
+  color: #fff;
+  cursor: pointer;
+  text-align: left;
+}
+.risk-options button.active {
+  border-color: #00C9A7;
+  box-shadow: 0 0 0 3px rgba(0, 201, 167, 0.16);
+}
+.risk-options small { color: #AAB4C5; font-weight: 700; }
+.ticker-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.ticker-grid input {
+  min-width: 0;
+  min-height: 50px;
+  padding: 0 12px;
+  border: 1px solid #1E2D4A;
+  border-radius: 8px;
+  outline: 0;
+  background: #141B2D;
+  color: #fff;
+  text-transform: uppercase;
+  font-weight: 850;
+}
+.ticker-grid input:focus, .input-shell:focus-within {
+  border-color: #00C9A7;
+  box-shadow: 0 0 0 3px rgba(0, 201, 167, 0.14);
+}
+.primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 54px;
+  border-radius: 8px;
+  background: #00C9A7;
+  color: #061512;
+  cursor: pointer;
+  font-weight: 950;
+}
+.primary:disabled { cursor: not-allowed; opacity: 0.52; }
+.error {
+  margin-top: 14px;
+  padding: 12px;
+  border-radius: 8px;
+  background: rgba(239, 68, 68, 0.14);
+  color: #FCA5A5;
+  font-size: 13px;
+  font-weight: 800;
+}
+.output { display: grid; gap: 14px; min-width: 0; }
+.empty-panel, .loading-panel {
+  min-height: 560px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 8px;
+  padding: 44px;
+  text-align: center;
+}
+.empty-panel strong {
+  color: #fff;
+  font-size: clamp(34px, 4vw, 58px);
+  line-height: 1;
+}
+.empty-panel span { color: #AAB4C5; font-size: 16px; font-weight: 750; }
+.empty-panel small { color: #7F8AA3; font-size: 12px; font-weight: 750; }
+.pulse-dots { display: flex; gap: 10px; margin-bottom: 12px; }
+.pulse-dots span {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: #00C9A7;
+  animation: pulse 900ms ease-in-out infinite alternate;
+}
+.pulse-dots span:nth-child(2) { animation-delay: 160ms; }
+.pulse-dots span:nth-child(3) { animation-delay: 320ms; }
+.loading-panel strong { color: #fff; font-size: clamp(28px, 3vw, 44px); }
+.loading-panel small { color: #AAB4C5; font-weight: 750; }
+@keyframes pulse { from { opacity: 0.35; transform: scale(0.75); } to { opacity: 1; transform: scale(1.18); } }
+.summary-grid { display: grid; grid-template-columns: 1.1fr 1fr; gap: 12px; }
+.metric-card { padding: 16px; }
+.metric-card.dark { background: linear-gradient(135deg, #00C9A7, #141B2D); color: #fff; }
+.report-card { overflow: hidden; border-width: 2px; }
+.report-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 26px;
+  border-bottom: 1px solid #1E2D4A;
+}
+.action-row { display: flex; gap: 8px; }
+.action-row button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 38px;
+  padding: 0 12px;
+  border: 1px solid #1E2D4A;
+  border-radius: 8px;
+  background: #0F1628;
+  color: #E0E0E0;
+  cursor: pointer;
+  font-weight: 850;
+}
+.bucket-strip {
+  display: flex;
+  height: 14px;
+  margin: 24px 26px 0;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #0F1628;
+}
+.bucket-fill.core, .dot.core { background: #22C55E; }
+.bucket-fill.growth, .dot.growth { background: #F59E0B; }
+.bucket-fill.speculative, .dot.speculative { background: #EF4444; }
+.stock-grid { display: grid; gap: 16px; padding: 24px 26px 26px; }
+.stock-card { display: grid; gap: 16px; padding: 20px; }
+.stock-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.stock-name { display: grid; gap: 4px; }
+.stock-name strong { color: #fff; font-size: 26px; }
+.stock-name span {
+  color: #AAB4C5;
+  font-weight: 750;
+  white-space: normal;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+.fall-badge {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: rgba(239, 68, 68, 0.16);
+  color: #FCA5A5;
+  padding: 7px 10px;
+  font-size: 13px;
+  font-weight: 950;
+}
+.bucket {
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  border-radius: 999px;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 950;
+  white-space: nowrap;
+}
+.bucket.core { background: rgba(34, 197, 94, 0.14); color: #86EFAC; }
+.bucket.growth { background: rgba(245, 158, 11, 0.16); color: #FCD34D; }
+.bucket.speculative { background: rgba(239, 68, 68, 0.16); color: #FCA5A5; }
+.big-money strong {
+  display: block;
+  margin-top: 5px;
+  color: #00C9A7;
+  font-size: clamp(32px, 4.4vw, 58px);
+  line-height: 1;
+}
+.price-line {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.price-line div {
+  border: 1px solid #1E2D4A;
+  border-radius: 8px;
+  background: #0F1628;
+  padding: 14px;
+}
+.price-line strong {
+  display: block;
+  margin-top: 6px;
+  color: #fff;
+  font-size: 23px;
+  font-variant-numeric: tabular-nums;
+}
+.signal-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-radius: 8px;
+  padding: 17px 18px;
+  color: #fff;
+}
+.signal-banner.green { background: #15803D; }
+.signal-banner.yellow { background: #B45309; }
+.signal-banner.red { background: #B91C1C; }
+.signal-banner strong { display: block; font-size: clamp(22px, 3vw, 36px); line-height: 1; }
+.signal-banner span { display: block; max-width: 330px; text-align: right; font-weight: 850; }
+.signal-reason {
+  margin: -6px 0 0;
+  color: #AAB4C5;
+  font-size: 14px;
+  line-height: 1.45;
+  font-weight: 750;
+}
+.bucket-reason { margin: 0; color: #E0E0E0; font-size: 15px; font-weight: 850; }
+.risk-box {
+  border: 1px solid #1E2D4A;
+  border-radius: 8px;
+  background: #192238;
+  padding: 16px;
+}
+.risk-box h3 { margin: 0 0 10px; color: #fff; font-size: 18px; }
+.risk-box ul {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding-left: 18px;
+  color: #E0E0E0;
+  font-size: 14px;
+  line-height: 1.4;
+  font-weight: 750;
+}
+.scenario-section { display: grid; gap: 16px; padding: 22px; }
+.scenario-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.scenario-card {
+  border: 1px solid #1E2D4A;
+  border-radius: 8px;
+  background: #0F1628;
+  padding: 18px;
+}
+.scenario-card strong {
+  display: block;
+  margin-top: 10px;
+  color: #00C9A7;
+  font-size: clamp(30px, 4vw, 48px);
+  line-height: 1;
+}
+.whatsapp-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 56px;
+  border-radius: 8px;
+  background: #25D366;
+  color: #062D17;
+  cursor: pointer;
+  font-size: 17px;
+  font-weight: 950;
+}
+.legal-disclaimer {
+  max-width: 980px;
+  margin: 0 auto 8px;
+  color: #7F8AA3;
+  text-align: center;
+  font-size: 11px;
+  line-height: 1.45;
+}
+.spin { animation: spin 900ms linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (max-width: 1120px) {
+  .hero, .layout, .summary-grid, .scenario-grid { grid-template-columns: 1fr; }
+  .form-card { position: static; }
+}
+@media (max-width: 680px) {
+  .war-room { padding: 16px; }
+  .ticker-grid, .price-line { grid-template-columns: 1fr; }
+  .report-head, .stock-head, .signal-banner { flex-direction: column; }
+  .signal-banner { align-items: flex-start; }
+  .signal-banner span { text-align: left; }
+  .fall-badge { align-self: flex-start; }
+}
+@media print {
+  .war-room { padding: 0; background: #fff; color: #111; }
+  .form-card, .hero-card, .action-row, .whatsapp-button { display: none; }
+  .hero, .layout, .summary-grid, .scenario-grid { display: block; width: 100%; }
+  .report-card, .metric-card, .scenario-section { box-shadow: none; margin-bottom: 12px; }
+}
+`;
