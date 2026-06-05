@@ -5,6 +5,7 @@ import {
   CircleDollarSign,
   Download,
   Loader2,
+  ShieldCheck,
   Plus,
   MessageCircle,
   Printer,
@@ -97,6 +98,14 @@ const loadingMessages = [
   "Almost ready..."
 ];
 
+const complianceBullets = [
+  "War Room Allocator is an educational portfolio-planning tool. It is not a SEBI registered Investment Adviser, Research Analyst, broker, portfolio manager, research entity, or stock recommendation service.",
+  "The output is not investment advice, research advice, a research report, a public recommendation, a solicitation, an offer, or a call to buy, sell, hold, subscribe, redeem, or otherwise transact in any security.",
+  "The tool does not perform SEBI-style client onboarding, suitability assessment, risk profiling, KYC, fiduciary review, conflict management, or personalised advisory checks required from regulated intermediaries.",
+  "Market data may be delayed, incomplete, inaccurate, or unavailable. AI-generated calculations can be wrong. Past performance, 52-week ranges, price targets, scenarios, and simulated upside do not guarantee future returns.",
+  "You are solely responsible for every financial decision. Consult a SEBI registered Investment Adviser before investing and verify all information with official exchange, company, and SEBI sources."
+];
+
 function bucketClass(bucket: Bucket) {
   return bucket.toLowerCase();
 }
@@ -123,10 +132,10 @@ function signalCount(rows: AllocationRow[], tone: BuySignal["tone"]) {
 }
 
 function portfolioVerdict(rows: AllocationRow[]) {
-  const buy = signalCount(rows, "green");
-  const accumulate = signalCount(rows, "yellow");
+  const entry = signalCount(rows, "green");
+  const build = signalCount(rows, "yellow");
   const wait = signalCount(rows, "red");
-  return `${buy} buy, ${accumulate} accumulate, ${wait} wait. The plan below shows what to buy, what to watch, and where the possible upside comes from.`;
+  return `${entry} entry-zone, ${build} build-slowly, ${wait} wait. The plan below shows position size, risk, and where the possible upside comes from.`;
 }
 
 function scenarioGain(rows: AllocationRow[], bucket: Bucket, returnPercent: number) {
@@ -142,6 +151,12 @@ export default function Home() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [loadingIndex, setLoadingIndex] = useState(0);
+  const [complianceAccepted, setComplianceAccepted] = useState(false);
+  const [hasReadCompliance, setHasReadCompliance] = useState(false);
+
+  useEffect(() => {
+    setComplianceAccepted(window.localStorage.getItem("war-room-compliance-v2") === "accepted");
+  }, []);
 
   useEffect(() => {
     if (!loading) {
@@ -259,6 +274,63 @@ export default function Home() {
     window.open(`https://wa.me/?text=${encodeURIComponent(message)}`, "_blank", "noopener,noreferrer");
   }
 
+  function acceptCompliance() {
+    if (!hasReadCompliance) return;
+    window.localStorage.setItem("war-room-compliance-v2", "accepted");
+    setComplianceAccepted(true);
+  }
+
+  if (!complianceAccepted) {
+    return (
+      <main className="war-room compliance-screen">
+        <style>{pageCss}</style>
+        <section className="compliance-gate" aria-labelledby="compliance-title">
+          <div className="compliance-header">
+            <ShieldCheck size={34} aria-hidden />
+            <p className="eyebrow">Mandatory SEBI-aware acknowledgement</p>
+            <h1 id="compliance-title">Read this before using War Room Allocator</h1>
+            <p>
+              Access is locked until you confirm that you understand this is only an educational planning tool and not regulated investment advice or research.
+            </p>
+          </div>
+
+          <div className="compliance-body">
+            <section>
+              <h2>Regulatory Status</h2>
+              <ul>
+                {complianceBullets.map((bullet) => <li key={bullet}>{bullet}</li>)}
+              </ul>
+            </section>
+
+            <section>
+              <h2>SEBI Framework Referenced</h2>
+              <p>
+                This acknowledgement is written with reference to the SEBI Act, 1992, SEBI (Investment Advisers) Regulations, 2013, SEBI (Research Analysts) Regulations, 2014, SEBI (Prohibition of Fraudulent and Unfair Trade Practices relating to Securities Market) Regulations, 2003, SEBI KYC / intermediary requirements, exchange risk disclosures, and investor-grievance norms including SCORES. It does not replace the full text of any law, circular, amendment, exchange rule, or SEBI guidance.
+              </p>
+            </section>
+
+            <section>
+              <h2>User Declaration</h2>
+              <label className="compliance-check">
+                <input
+                  type="checkbox"
+                  checked={hasReadCompliance}
+                  onChange={(event) => setHasReadCompliance(event.target.checked)}
+                />
+                <span>I understand this tool gives educational, AI-generated planning output only. I will not treat it as a buy, sell, hold, research, or investment recommendation.</span>
+              </label>
+            </section>
+          </div>
+
+          <button className="primary compliance-action" type="button" disabled={!hasReadCompliance} onClick={acceptCompliance}>
+            <ShieldCheck size={18} aria-hidden />
+            Unlock educational tool
+          </button>
+        </section>
+      </main>
+    );
+  }
+
   return (
     <main className="war-room">
       <style>{pageCss}</style>
@@ -269,7 +341,7 @@ export default function Home() {
           <h1>War Room Allocator {"\u2014"} by Aarit Shah</h1>
           <p className="subhead">
             Add stocks from your current portfolio or stocks you are watching. The tool shows possible upside,
-            better entry zones, risk level, and a simple buy/watch plan.
+            better entry zones, risk level, and a simple position-sizing plan.
           </p>
         </div>
         <div className="hero-card">
@@ -288,7 +360,7 @@ export default function Home() {
 
           <div className="guide-card">
             <strong>Start here</strong>
-            <span>Enter your total capital, then add every stock you own or are thinking of buying. Use NSE tickers like TCS, INFY, RELIANCE, IDEA, E2E.</span>
+            <span>Enter your total capital, then add every stock you own or want to track. Use NSE tickers like TCS, INFY, RELIANCE, IDEA, E2E.</span>
           </div>
 
           <label className="field">
@@ -383,7 +455,7 @@ export default function Home() {
                   <h2>{portfolioVerdict(result.rows)}</h2>
                   <p className="summary-explainer">
                     Core means safer base stocks. Growth means higher upside stocks. Speculative means higher-risk bets.
-                    Buy zone means the stock looks interesting now. Accumulate means buy slowly. Wait means do not rush.
+                    Entry zone means the price is closer to its historical low range. Build slowly means stagger any personal decision. Wait means do not rush.
                   </p>
                 </div>
                 <div className="mobile-jumps" aria-label="Report shortcuts">
@@ -406,8 +478,8 @@ export default function Home() {
                   ))}
                 </div>
                 <div className="summary-row three">
-                  <div><span>Buy zone</span><strong>{signalCount(result.rows, "green")}/{result.rows.length}</strong></div>
-                  <div><span>Accumulate</span><strong>{signalCount(result.rows, "yellow")}/{result.rows.length}</strong></div>
+                  <div><span>Entry zone</span><strong>{signalCount(result.rows, "green")}/{result.rows.length}</strong></div>
+                  <div><span>Build slowly</span><strong>{signalCount(result.rows, "yellow")}/{result.rows.length}</strong></div>
                   <div><span>Wait zone</span><strong>{signalCount(result.rows, "red")}/{result.rows.length}</strong></div>
                 </div>
                 {result.sectorWarnings.length ? (
@@ -510,7 +582,7 @@ export default function Home() {
                       </div>
 
                       <div className="buy-plan">
-                        <strong>{row.buySignal.tone === "red" ? "Watchlist mode" : "Suggested buy plan"}</strong>
+                        <strong>{row.buySignal.tone === "red" ? "Watchlist mode" : "Position-sizing note"}</strong>
                         <span>{row.buyPlan}</span>
                       </div>
 
@@ -522,7 +594,7 @@ export default function Home() {
                       ) : (
                         <div className="price-line">
                           <div>
-                            <span>Shares to buy</span>
+                            <span>Estimated shares</span>
                             <strong>{row.estimatedShares}</strong>
                           </div>
                           <div>
@@ -546,7 +618,7 @@ export default function Home() {
                           <section><h3>Why this category</h3><p>{row.whyBucket}</p></section>
                           <section><h3>Why this amount</h3><p>{row.whyAllocation}</p></section>
                           <section><h3>Why this entry price</h3><p>{row.whyBuyBelowPrice}</p></section>
-                          <section><h3>Why this signal</h3><p>{row.whySignal}</p></section>
+                          <section><h3>Why this zone</h3><p>{row.whySignal}</p></section>
                         </div>
                       ) : null}
 
@@ -576,7 +648,7 @@ export default function Home() {
                       </div>
 
                       <div className="risk-box">
-                        <h3>Exit Signal</h3>
+                        <h3>Risk / Profit Checkpoints</h3>
                         <ul>
                           {row.exitSignals.map((bullet) => <li key={bullet}>{bullet}</li>)}
                         </ul>
@@ -592,7 +664,7 @@ export default function Home() {
               </button>
 
               <p className="legal-disclaimer" id="disclaimer">
-                This tool is for educational purposes only and is not financial advice, research advice, or a recommendation to buy or sell any security under SEBI guidelines. Outputs are AI-generated and may be inaccurate. Past performance does not guarantee future results. Consult a SEBI registered investment advisor before investing. The creator holds no liability for any financial decisions made using this tool.
+                SEBI-aware disclaimer: War Room Allocator is for education and portfolio planning only. It is not a SEBI registered Investment Adviser, Research Analyst, broker, portfolio manager, research entity, or intermediary. Nothing shown here is investment advice, research advice, a research report, an offer, solicitation, or recommendation to buy, sell, hold, subscribe, redeem, or transact in any security. Outputs are AI-generated and may be inaccurate, delayed, incomplete, or unsuitable for you. Past performance and simulated upside do not guarantee future returns. Consult a SEBI registered Investment Adviser and verify official data before making any financial decision. The creator accepts no liability for decisions made using this tool.
               </p>
             </>
           )}
@@ -616,6 +688,96 @@ button { border: 0; }
   min-height: 100vh;
   padding: 28px;
   background: #0A0F1E;
+}
+.compliance-screen {
+  display: grid;
+  place-items: center;
+}
+.compliance-gate {
+  width: min(980px, 100%);
+  display: grid;
+  gap: 18px;
+  border: 1px solid #D7E1DD;
+  border-radius: 8px;
+  background: #FFFFFF;
+  padding: clamp(20px, 4vw, 38px);
+  box-shadow: 0 22px 70px rgba(15, 23, 42, 0.14);
+}
+.compliance-header {
+  display: grid;
+  gap: 10px;
+}
+.compliance-header svg {
+  color: #007C68;
+}
+.compliance-header h1 {
+  max-width: 860px;
+  color: #050505;
+  font-size: clamp(34px, 5vw, 62px);
+}
+.compliance-header p {
+  max-width: 780px;
+  margin: 0;
+  color: #334155;
+  font-size: 17px;
+  line-height: 1.5;
+  font-weight: 750;
+}
+.compliance-body {
+  display: grid;
+  gap: 12px;
+}
+.compliance-body section {
+  border: 1px solid #D7E1DD;
+  border-radius: 8px;
+  background: #F8FAFC;
+  padding: 16px;
+}
+.compliance-body h2 {
+  margin-bottom: 10px;
+  color: #050505;
+  font-size: 20px;
+}
+.compliance-body p,
+.compliance-body li {
+  color: #050505;
+  font-size: 14px;
+  line-height: 1.5;
+  font-weight: 750;
+}
+.compliance-body ul {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding-left: 18px;
+}
+.compliance-body p {
+  margin: 0;
+}
+.compliance-check {
+  display: grid;
+  grid-template-columns: 22px 1fr;
+  gap: 10px;
+  align-items: start;
+  cursor: pointer;
+}
+.compliance-check input {
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+  accent-color: #007C68;
+}
+.compliance-check span {
+  color: #050505;
+  font-size: 15px;
+  line-height: 1.45;
+  font-weight: 850;
+}
+.compliance-action {
+  justify-self: start;
+  width: auto;
+  min-width: 240px;
+  padding: 0 18px;
 }
 .hero, .layout { width: min(1480px, 100%); margin: 0 auto; }
 .hero {

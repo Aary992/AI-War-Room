@@ -396,7 +396,7 @@ function buySignalFor(profile: StockProfile): {
 
   if (lowDistance <= 15) {
     return {
-      label: "\u{1F7E2} Strong Buy Zone",
+      label: "\u{1F7E2} Strong Entry Zone",
       tone: "green",
       detail: `${profile.requestedTicker} is ${lowDistance.toFixed(0)}% above its 52 week low.`,
       reason: `${profile.requestedTicker} is only ${lowDistance.toFixed(0)}% above its 52 week low in ${profile.sector}.`
@@ -405,7 +405,7 @@ function buySignalFor(profile: StockProfile): {
 
   if (fall > 20 && lowDistance > 10) {
     return {
-      label: "\u{1F7E1} Good Entry \u2014 Buy In Parts",
+      label: "\u{1F7E1} Build Slowly Zone",
       tone: "yellow",
       detail: `${profile.requestedTicker} is ${fall.toFixed(0)}% below its 52 week high.`,
       reason: `${profile.requestedTicker} is ${fall.toFixed(0)}% below its 52 week high, but not near yearly lows yet.`
@@ -414,7 +414,7 @@ function buySignalFor(profile: StockProfile): {
 
   if (fall <= 10) {
     return {
-      label: "\u{1F534} Too Expensive \u2014 Wait For A Dip",
+      label: "\u{1F534} Expensive Area \u2014 Wait For A Dip",
       tone: "red",
       detail: `${profile.requestedTicker} is within 10% of its 52 week high.`,
       reason: `${profile.requestedTicker} is close to its 52 week high, so entry risk is higher.`
@@ -422,7 +422,7 @@ function buySignalFor(profile: StockProfile): {
   }
 
   return {
-    label: "\u{1F7E1} Good Entry \u2014 Buy In Parts",
+    label: "\u{1F7E1} Build Slowly Zone",
     tone: "yellow",
     detail: `${profile.requestedTicker} has cooled from highs but is not deeply cheap.`,
     reason: `${profile.requestedTicker} has cooled from its high, but is not deeply cheap yet.`
@@ -498,10 +498,10 @@ function riskMeterFor(profile: StockProfile) {
 }
 
 function buyPlanFor(profile: StockProfile, canBuy: boolean) {
-  if (!canBuy) return "Watchlist only. Do not force a buy until the allocated capital can buy at least 1 share.";
-  if (profile.bucket === "Core") return "Buy 50% near the better entry price, keep 50% for a second dip.";
-  if (profile.bucket === "Growth") return "Buy 35% near the better entry price, keep 65% for dips or confirmation.";
-  return "Buy only 20% near the better entry price, keep 80% aside because this is higher risk.";
+  if (!canBuy) return "Watchlist only. The allocated amount is below the current price of 1 share.";
+  if (profile.bucket === "Core") return "Model note: 50% near the better entry price, with 50% kept aside for a second dip.";
+  if (profile.bucket === "Growth") return "Model note: 35% near the better entry price, with 65% kept aside for dips or confirmation.";
+  return "Model note: 20% near the better entry price, with 80% kept aside because this is higher risk.";
 }
 
 function riskBulletsFor(profile: StockProfile) {
@@ -707,7 +707,7 @@ function bullCaseTriggersFor(profile: StockProfile) {
   return [
     `${profile.name} can move higher if ${profile.sector} demand improves over the next few quarters.`,
     `${profile.name} can rerate if revenue growth beats expectations while margins remain stable.`,
-    `${profile.name} can attract fresh buying if institutional liquidity improves near the suggested entry zone.`
+    `${profile.name} can attract fresh institutional interest if liquidity improves near the model entry zone.`
   ];
 }
 
@@ -715,8 +715,8 @@ function exitSignalsFor(profile: StockProfile, buyBelowPrice: number) {
   const target = buyBelowPrice * 1.25;
   const low = profile.fiftyTwoWeekLow ?? buyBelowPrice * 0.9;
   return [
-    `Consider taking profits near ${INR_FORMATTER.format(target)}, which is 25% above the buy-below price.`,
-    `Cut the thesis if ${profile.name} breaks below its 52 week low near ${INR_FORMATTER.format(low)} on high volume.`
+    `Profit-planning checkpoint: ${INR_FORMATTER.format(target)}, which is 25% above the model entry price.`,
+    `Risk-review checkpoint: ${profile.name} breaking below its 52 week low near ${INR_FORMATTER.format(low)} on high volume.`
   ];
 }
 
@@ -911,7 +911,7 @@ function allocate({
       buySignal: buySignalFor(profile),
       riskBullets: riskBulletsFor(profile),
       canBuy: amount >= profile.price,
-      watchMessage: amount < profile.price ? "Capital too low to buy even 1 share at current price. Watch this stock and add capital later." : null,
+      watchMessage: amount < profile.price ? "Allocated capital is below the current price of 1 share. Keep this on the watchlist and review later." : null,
       riskMeter: riskMeterFor(profile),
       buyPlan: buyPlanFor(profile, amount >= profile.price),
       plainBucket: plainBucketLabel(profile.bucket),
@@ -1076,9 +1076,9 @@ export async function POST(request: Request) {
       healthChecks: buildHealthChecks(rows, maxPositionPercent, cashReservePercent),
       notes: [
         "Market data is fetched from free public Yahoo Finance chart endpoints.",
-        "Fair value is estimated from price history, moving averages, 52-week range, and volatility; this is a planning aid, not financial advice.",
+        "Fair value is estimated from price history, moving averages, 52-week range, and volatility; this is an educational planning aid, not financial advice or research advice.",
         "Entry zone uses a 25% margin of safety below estimated fair value.",
-        "This output is for portfolio planning and is not financial advice."
+        "This output is not a recommendation to buy, sell, hold, subscribe, redeem, or transact in any security."
       ]
     });
   } catch (error) {
